@@ -1,0 +1,24 @@
+{
+  "name": "ludo-money-game",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Secure, server-authoritative multiplayer Ludo with a coin wallet (real-money ready).",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "concurrently -n SERVER,CLIENT -c blue,green \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "npm --workspace server run dev",
+    "dev:client": "npm --workspace client run dev",
+    "test": "npm --workspace server test",
+    "start": "npm --workspace server run start"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
