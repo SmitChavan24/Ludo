@@ -78,11 +78,86 @@ export class MysqlStore {
   }
 
   async recordGame(summary) {
-    await this.pool.execute(
-      `INSERT INTO games(id, data, ended_at) VALUES(?,?,?)
-       ON DUPLICATE KEY UPDATE data=VALUES(data), ended_at=VALUES(ended_at)`,
-      [summary.id, JSON.stringify(summary), summary.endedAt || Date.now()],
+    const endedAt = summary.endedAt || Date.now();
+    const conn = await this.pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      await conn.execute(
+        `INSERT INTO games(id, data, ended_at) VALUES(?,?,?)
+         ON DUPLICATE KEY UPDATE data=VALUES(data), ended_at=VALUES(ended_at)`,
+        [summary.id, JSON.stringify(summary), endedAt],
+      );
+
+      const players = summary.players || [];
+      if (players.length) {
+        const rows = players.map((p) => {
+          const isWinner = p.userId === summary.winnerId ? 1 : 0;
+          const payout = isWinner ? summary.payout || 0 : 0;
+          return [summary.id, p.userId, p.name || null, p.color || null, isWinner, summary.stake || 0, payout, payout - (summary.stake || 0), endedAt];
+        });
+        await conn.query(
+          `INSERT INTO game_players(game_id, user_id, name, color, is_winner, stake, payout, net, ended_at) VALUES ?
+           ON DUPLICATE KEY UPDATE is_winner=VALUES(is_winner), payout=VALUES(payout), net=VALUES(net)`,
+          [rows],
+        );
+      }
+      await conn.commit();
+    } catch (e) {
+      try {
+        await conn.rollback();
+      } catch {
+        /* ignore */
+      }
+      throw e;
+    } finally {
+      conn.release();
+    }
+  }
+
+  // A player's recent games, newest first.
+  async getUserGames(userId, limit = 20) {
+    const lim = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
+    const [rows] = await this.pool.query(
+      `SELECT gp.game_id, gp.is_winner, gp.stake, gp.payout, gp.net, gp.ended_at, g.data
+       FROM game_players gp JOIN games g ON g.id = gp.game_id
+       WHERE gp.user_id=? ORDER BY gp.ended_at DESC LIMIT ${lim}`,
+      [userId],
     );
+    return rows.map((r) => {
+      const data = typeof r.data === 'string' ? JSON.parse(r.data) : r.data || {};
+      return {
+        gameId: r.game_id,
+        stake: Number(r.stake),
+        pot: data.pot ?? null,
+        isWinner: !!r.is_winner,
+        payout: Number(r.payout),
+        net: Number(r.net),
+        endedAt: Number(r.ended_at),
+        players: (data.players || []).map((p) => ({ userId: p.userId, name: p.name || null, color: p.color || null })),
+      };
+    });
+  }
+
+  // Top players by net coins won (optionally within a time window).
+  async getLeaderboard({ limit = 20, since = null } = {}) {
+    const lim = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
+    const where = since ? 'WHERE gp.ended_at >= ?' : '';
+    const params = since ? [since] : [];
+    const [rows] = await this.pool.query(
+      `SELECT u.id, u.name, COUNT(*) AS games, SUM(gp.is_winner) AS wins, SUM(gp.net) AS net
+       FROM game_players gp JOIN users u ON u.id = gp.user_id
+       ${where}
+       GROUP BY u.id, u.name ORDER BY net DESC, wins DESC LIMIT ${lim}`,
+      params,
+    );
+    return rows.map((r, i) => ({
+      rank: i + 1,
+      userId: r.id,
+      name: r.name,
+      games: Number(r.games),
+      wins: Number(r.wins),
+      net: Number(r.net),
+    }));
   }
 
   async incrementStats(userId, won) {

@@ -89,3 +89,16 @@ router.get('/wallet', requireAuth, async (req, res) => {
     history: await wallet.historyFor(req.user.id, 50),
   });
 });
+
+// ── Game history & leaderboard (DB-backed) ──
+router.get('/me/games', requireAuth, async (req, res) => {
+  const limit = parseInt(req.query.limit, 10) || 20;
+  res.json({ games: await store.getUserGames(req.user.id, limit) });
+});
+
+router.get('/leaderboard', requireAuth, async (req, res) => {
+  const limit = parseInt(req.query.limit, 10) || 20;
+  const period = req.query.period === 'week' ? 'week' : 'all';
+  const since = period === 'week' ? Date.now() - 7 * 24 * 60 * 60 * 1000 : null;
+  res.json({ period, leaderboard: await store.getLeaderboard({ limit, since }) });
+});

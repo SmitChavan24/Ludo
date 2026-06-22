@@ -8,6 +8,7 @@ export class MemoryStore {
     this.usersByProvider = new Map();
     this.refreshSessions = new Map();
     this.games = new Map();
+    this.gamePlayers = []; // one entry per player per finished game
   }
 
   _providerKey(provider, providerId) {
@@ -56,6 +57,61 @@ export class MemoryStore {
 
   async recordGame(summary) {
     this.games.set(summary.id, summary);
+    const endedAt = summary.endedAt || Date.now();
+    for (const p of summary.players || []) {
+      const isWinner = p.userId === summary.winnerId;
+      const payout = isWinner ? summary.payout || 0 : 0;
+      this.gamePlayers.push({
+        gameId: summary.id,
+        userId: p.userId,
+        name: p.name || null,
+        color: p.color || null,
+        isWinner,
+        stake: summary.stake || 0,
+        payout,
+        net: payout - (summary.stake || 0),
+        endedAt,
+      });
+    }
+  }
+
+  async getUserGames(userId, limit = 20) {
+    const lim = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
+    return this.gamePlayers
+      .filter((r) => r.userId === userId)
+      .sort((a, b) => b.endedAt - a.endedAt)
+      .slice(0, lim)
+      .map((r) => {
+        const g = this.games.get(r.gameId);
+        return {
+          gameId: r.gameId,
+          stake: r.stake,
+          pot: g?.pot ?? null,
+          isWinner: r.isWinner,
+          payout: r.payout,
+          net: r.net,
+          endedAt: r.endedAt,
+          players: (g?.players || []).map((p) => ({ userId: p.userId, name: p.name || null, color: p.color || null })),
+        };
+      });
+  }
+
+  async getLeaderboard({ limit = 20, since = null } = {}) {
+    const lim = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
+    const agg = new Map();
+    for (const r of this.gamePlayers) {
+      if (since && r.endedAt < since) continue;
+      const a = agg.get(r.userId) || { userId: r.userId, games: 0, wins: 0, net: 0 };
+      a.games += 1;
+      if (r.isWinner) a.wins += 1;
+      a.net += r.net;
+      agg.set(r.userId, a);
+    }
+    return [...agg.values()]
+      .map((a) => ({ ...a, name: this.users.get(a.userId)?.name || null }))
+      .sort((x, y) => y.net - x.net || y.wins - x.wins)
+      .slice(0, lim)
+      .map((a, i) => ({ rank: i + 1, ...a }));
   }
 
   async incrementStats(userId, won) {

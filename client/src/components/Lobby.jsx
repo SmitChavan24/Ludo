@@ -3,6 +3,7 @@ import { useAuth } from '../store/auth.js';
 import { useGame } from '../store/game.js';
 import { gameApi } from '../api/socket.js';
 import { STAKES } from '../config.js';
+import StatsModal from './StatsModal.jsx';
 
 export default function Lobby() {
   const user = useAuth((s) => s.user);
@@ -16,6 +17,7 @@ export default function Lobby() {
   const [busy, setBusy] = useState(false);
   const [bonusMsg, setBonusMsg] = useState(null);
   const [copied, setCopied] = useState(null);
+  const [statsTab, setStatsTab] = useState(null);
 
   const run = (fn) => async () => {
     setBusy(true);
@@ -85,6 +87,11 @@ export default function Lobby() {
         🎁 Claim daily bonus {bonusMsg && <span className="bonus-flash">{bonusMsg}</span>}
       </button>
 
+      <div className="stats-row">
+        <button className="stat-btn" onClick={() => setStatsTab('leaderboard')}>🏆 Leaderboard</button>
+        <button className="stat-btn" onClick={() => setStatsTab('history')}>📜 My Games</button>
+      </div>
+
       {/* ── Random matchmaking (the main way to play) ── */}
       <section className="card hero-card">
         <h2>Play online</h2>
@@ -137,6 +144,8 @@ export default function Lobby() {
       </section>
 
       <footer className="lobby-foot">Server-verified moves · Provably-fair dice 🔒</footer>
+
+      {statsTab && <StatsModal initialTab={statsTab} onClose={() => setStatsTab(null)} />}
     </div>
   );
 }

@@ -42,6 +42,22 @@ const SCHEMA = [
      INDEX idx_games_ended (ended_at)
    ) ENGINE=InnoDB`,
 
+  // One row per player per finished game — powers history + leaderboard queries.
+  `CREATE TABLE IF NOT EXISTS game_players (
+     game_id   VARCHAR(32) NOT NULL,
+     user_id   VARCHAR(32) NOT NULL,
+     name      VARCHAR(255),
+     color     VARCHAR(16),
+     is_winner TINYINT     NOT NULL DEFAULT 0,
+     stake     BIGINT      NOT NULL,
+     payout    BIGINT      NOT NULL DEFAULT 0,
+     net       BIGINT      NOT NULL,
+     ended_at  BIGINT      NOT NULL,
+     PRIMARY KEY (game_id, user_id),
+     INDEX idx_gp_user (user_id, ended_at),
+     INDEX idx_gp_ended (ended_at)
+   ) ENGINE=InnoDB`,
+
   // Money tables.
   `CREATE TABLE IF NOT EXISTS balances (
      account_id VARCHAR(64) PRIMARY KEY,

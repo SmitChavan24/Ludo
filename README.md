@@ -70,6 +70,18 @@ fast in-memory backend while production runs on MySQL. **Coin operations use
 real DB transactions + row locks** (`SELECT … FOR UPDATE`), so escrow and
 settlement are atomic even across multiple server instances.
 
+### Game history & leaderboard
+
+Every finished game writes one row per player to `game_players`, powering:
+
+- `GET /api/me/games` — the signed-in player's recent games (opponents, stake,
+  win/loss, net coins), newest first.
+- `GET /api/leaderboard?period=all|week` — top players ranked by **net coins
+  won**, with win/games counts.
+
+In the app, the lobby's **🏆 Leaderboard** and **📜 My Games** buttons open these
+views. (Both work on the in-memory backend too, so they show up in dev.)
+
 ---
 
 ## How it works

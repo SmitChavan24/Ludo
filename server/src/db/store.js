@@ -19,4 +19,6 @@ export const store = {
   recordGame: (...a) => backend.recordGame(...a),
   incrementStats: (...a) => backend.incrementStats(...a),
   setDailyBonusClaimed: (...a) => backend.setDailyBonusClaimed(...a),
+  getUserGames: (...a) => backend.getUserGames(...a),
+  getLeaderboard: (...a) => backend.getLeaderboard(...a),
 };
