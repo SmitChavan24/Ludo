@@ -16,10 +16,10 @@ import { config } from '../config.js';
 
 export const router = Router();
 
-function issueTokens(user) {
+async function issueTokens(user) {
   return {
     accessToken: signAccessToken(user),
-    refreshToken: issueRefreshToken(user),
+    refreshToken: await issueRefreshToken(user),
     expiresIn: config.jwt.accessTtl,
   };
 }
@@ -33,7 +33,7 @@ router.post('/auth/google', authLimiter, async (req, res) => {
     if (!idToken) return res.status(400).json({ error: 'idToken is required' });
     const profile = await verifyGoogleIdToken(idToken);
     const { user, isNew } = await findOrCreateUser('google', profile);
-    res.json({ ...issueTokens(user), user: publicProfile(user), isNew });
+    res.json({ ...(await issueTokens(user)), user: await publicProfile(user), isNew });
   } catch (err) {
     res.status(401).json({ error: err.message || 'Google login failed' });
   }
@@ -46,29 +46,29 @@ if (config.allowDevLogin) {
     const slug = rawName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'guest';
     const profile = { providerId: `dev-${slug}`, email: null, name: rawName, picture: null };
     const { user, isNew } = await findOrCreateUser('dev', profile);
-    res.json({ ...issueTokens(user), user: publicProfile(user), isNew });
+    res.json({ ...(await issueTokens(user)), user: await publicProfile(user), isNew });
   });
 }
 
 // ── Refresh: rotate the refresh token (one-time use) and mint a new access token ──
-router.post('/auth/refresh', authLimiter, (req, res) => {
+router.post('/auth/refresh', authLimiter, async (req, res) => {
   try {
     const { refreshToken } = req.body || {};
     if (!refreshToken) return res.status(400).json({ error: 'refreshToken is required' });
-    const payload = verifyRefreshToken(refreshToken);
-    const user = store.getUser(payload.sub);
+    const payload = await verifyRefreshToken(refreshToken);
+    const user = await store.getUser(payload.sub);
     if (!user) return res.status(401).json({ error: 'Unknown user' });
-    const newRefresh = rotateRefreshToken(payload, user);
+    const newRefresh = await rotateRefreshToken(payload, user);
     res.json({ accessToken: signAccessToken(user), refreshToken: newRefresh, expiresIn: config.jwt.accessTtl });
   } catch {
     res.status(401).json({ error: 'Invalid refresh token' });
   }
 });
 
-router.post('/auth/logout', (req, res) => {
+router.post('/auth/logout', async (req, res) => {
   try {
     const { refreshToken } = req.body || {};
-    if (refreshToken) revokeRefreshToken(verifyRefreshToken(refreshToken));
+    if (refreshToken) await revokeRefreshToken(await verifyRefreshToken(refreshToken));
   } catch {
     /* already invalid — nothing to revoke */
   }
@@ -76,16 +76,16 @@ router.post('/auth/logout', (req, res) => {
 });
 
 // ── Authenticated account / wallet ──
-router.get('/me', requireAuth, (req, res) => res.json({ user: publicProfile(req.user) }));
+router.get('/me', requireAuth, async (req, res) => res.json({ user: await publicProfile(req.user) }));
 
 router.post('/me/daily-bonus', requireAuth, async (req, res) => {
   const result = await claimDailyBonus(req.user.id);
   res.json(result);
 });
 
-router.get('/wallet', requireAuth, (req, res) => {
+router.get('/wallet', requireAuth, async (req, res) => {
   res.json({
-    coins: wallet.getBalance(req.user.id),
-    history: wallet.historyFor(req.user.id, 50),
+    coins: await wallet.getBalance(req.user.id),
+    history: await wallet.historyFor(req.user.id, 50),
   });
 });

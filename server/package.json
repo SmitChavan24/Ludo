@@ -17,6 +17,7 @@
     "google-auth-library": "^9.15.0",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
+    "mysql2": "^3.11.5",
     "nanoid": "^5.0.9",
     "socket.io": "^4.8.1"
   }

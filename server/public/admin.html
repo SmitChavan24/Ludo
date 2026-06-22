@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CoinLudo Admin</title>
+    <link rel="stylesheet" href="/admin.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <!-- ── Login ── -->
+      <section id="login-view" class="card hidden">
+        <h1>🎲 CoinLudo Admin</h1>
+        <p class="sub">Sign in to manage player coins.</p>
+        <form id="login-form">
+          <label>Username<input id="username" autocomplete="username" required /></label>
+          <label>Password<input id="password" type="password" autocomplete="current-password" required /></label>
+          <button class="btn primary" type="submit">Sign in</button>
+        </form>
+        <p id="login-error" class="error hidden"></p>
+      </section>
+
+      <!-- ── Dashboard ── -->
+      <section id="dash-view" class="hidden">
+        <header class="topbar">
+          <h1>🎲 Admin</h1>
+          <button id="logout" class="btn ghost">Log out</button>
+        </header>
+
+        <div class="card">
+          <h2>Find a player</h2>
+          <p class="sub">Paste the player's exact ID (shown in their lobby).</p>
+          <form id="lookup-form" class="row">
+            <input id="lookup-id" placeholder="Player ID" required />
+            <button class="btn" type="submit">Look up</button>
+          </form>
+          <p id="lookup-error" class="error hidden"></p>
+        </div>
+
+        <div id="player-card" class="card hidden">
+          <h2 id="player-name"></h2>
+          <div class="player-meta">
+            <span>ID: <code id="player-id"></code></span>
+            <span id="player-email"></span>
+          </div>
+          <div class="balance">🪙 <span id="player-coins">0</span></div>
+
+          <div class="grid2">
+            <form id="credit-form" class="subform">
+              <h3>Credit coins</h3>
+              <input id="credit-amount" type="number" min="1" step="1" placeholder="Amount" required />
+              <input id="credit-reason" placeholder="Reason (e.g. upi-ref-123)" />
+              <button class="btn primary" type="submit">Add coins</button>
+            </form>
+            <form id="debit-form" class="subform">
+              <h3>Debit coins</h3>
+              <input id="debit-amount" type="number" min="1" step="1" placeholder="Amount" required />
+              <input id="debit-reason" placeholder="Reason (e.g. correction)" />
+              <button class="btn danger" type="submit">Remove coins</button>
+            </form>
+          </div>
+
+          <h3>Recent ledger</h3>
+          <table class="ledger">
+            <thead>
+              <tr><th>Reason</th><th>Change</th><th>Balance</th><th>When</th></tr>
+            </thead>
+            <tbody id="ledger-body"></tbody>
+          </table>
+        </div>
+
+        <p id="action-msg" class="msg hidden"></p>
+      </section>
+    </div>
+    <script src="/admin.js"></script>
+  </body>
+</html>

@@ -44,11 +44,29 @@ export const config = {
     refreshTtl: int('JWT_REFRESH_TTL', 2592000),
   },
   googleClientId: optional('GOOGLE_CLIENT_ID'),
-  // Shared secret the CRM/admin tooling sends as `x-admin-key` to credit coins.
-  // If unset, all admin endpoints are disabled (return 503).
-  adminApiKey: process.env.ADMIN_API_KEY || null,
+  // Admin / CRM access.
+  admin: {
+    // Shared secret for server-to-server CRM calls (`x-admin-key` header).
+    // If unset, the API-key path is disabled.
+    apiKey: process.env.ADMIN_API_KEY || null,
+    // Credentials for the admin WEB PAGE (logs in for a short-lived admin JWT).
+    // Web login is disabled unless a password is set.
+    username: process.env.ADMIN_USERNAME || 'admin',
+    password: process.env.ADMIN_PASSWORD || null,
+    jwtTtl: int('ADMIN_JWT_TTL', 1800), // admin session length, seconds (30 min)
+  },
   // Dev login is only ever enabled outside production.
   allowDevLogin: process.env.ALLOW_DEV_LOGIN === 'true' && !isProd,
+  // Storage backend. 'memory' (default) resets on restart; 'mysql' persists.
+  db: {
+    driver: process.env.DB_DRIVER || 'memory',
+    host: process.env.DB_HOST || '127.0.0.1',
+    port: int('DB_PORT', 3306),
+    user: process.env.DB_USER || 'coinludo',
+    password: process.env.DB_PASSWORD || '',
+    database: process.env.DB_NAME || 'coinludo',
+    connectionLimit: int('DB_POOL', 10),
+  },
   economy: {
     signupBonus: int('SIGNUP_BONUS_COINS', 1000),
     dailyBonus: int('DAILY_BONUS_COINS', 100),

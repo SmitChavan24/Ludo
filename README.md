@@ -118,6 +118,45 @@ The money path is already abstracted behind `Wallet`. To go live later:
 
 ---
 
+## Admin / CRM coin top-ups
+
+Players join random matches (2/3/4 players) via **Quick Match** — no code needed.
+Codes only exist for the optional **private friend rooms**.
+
+There are two ways to top up coins. Each player's **Player ID** is shown in their
+lobby (tap to copy) — that's the `userId` you credit.
+
+### Admin web page (for a human)
+
+Open **http://localhost:4000/admin** and sign in with `ADMIN_USERNAME` /
+`ADMIN_PASSWORD`. Login issues a short-lived **admin JWT** (kept in the tab only)
+that authorizes every action — look up a player by ID, see their balance + ledger,
+and credit/debit coins. A normal player's token can never reach these endpoints
+(the admin JWT carries a separate `admin` scope). Set `ADMIN_PASSWORD` to enable it.
+
+### Admin API (for your CRM, server-to-server)
+
+Call the API directly, gated by the `x-admin-key` header = your `ADMIN_API_KEY`.
+
+```bash
+# Confirm the account + see balance/ledger before crediting
+curl http://localhost:4000/api/admin/users/<userId> \
+  -H "x-admin-key: $ADMIN_API_KEY"
+
+# Credit coins (e.g. after a ₹99 UPI payment → 8,000 coins)
+curl -X POST http://localhost:4000/api/admin/credit \
+  -H "x-admin-key: $ADMIN_API_KEY" -H "Content-Type: application/json" \
+  -d '{"userId":"<userId>","amount":8000,"reason":"upi-ref-12345"}'
+
+# Debit (corrections / manual refunds)
+curl -X POST http://localhost:4000/api/admin/debit \
+  -H "x-admin-key: $ADMIN_API_KEY" -H "Content-Type: application/json" \
+  -d '{"userId":"<userId>","amount":500,"reason":"correction"}'
+```
+
+Every top-up flows through the same audited coin ledger. Keep `ADMIN_API_KEY`
+secret and, in production, also restrict these endpoints by IP / private network.
+
 ## Configuration
 
 All server config is in `server/.env` (see `server/.env.example`). Key values:

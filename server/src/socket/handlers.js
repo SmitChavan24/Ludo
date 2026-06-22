@@ -7,12 +7,12 @@ import { GameError } from '../game/LudoEngine.js';
 // only ever produce an error reply — never a crash or an illegal state change.
 export function registerSocketHandlers(io, manager) {
   // ── Handshake auth: no valid JWT, no socket. ──
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     try {
       const token = socket.handshake.auth?.token;
       if (!token) return next(new Error('Auth token required'));
       const payload = verifyAccessToken(token);
-      const user = store.getUser(payload.sub);
+      const user = await store.getUser(payload.sub);
       if (!user) return next(new Error('Unknown user'));
       socket.data.user = user;
       next();
@@ -52,8 +52,8 @@ export function registerSocketHandlers(io, manager) {
     const joinSocketRoom = (room) => socket.join(`room:${room.id}`);
 
     // Private friend room — joined by code, never matched into randomly.
-    on('lobby:create', ({ stake, maxPlayers, rules }) => {
-      const room = manager.createRoom(user, { stake, maxPlayers, rules, isPrivate: true });
+    on('lobby:create', async ({ stake, maxPlayers, rules }) => {
+      const room = await manager.createRoom(user, { stake, maxPlayers, rules, isPrivate: true });
       joinSocketRoom(room);
       socket.emit('room:update', manager.serializeRoom(room));
       return { roomId: room.id };

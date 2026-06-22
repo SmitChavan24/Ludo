@@ -18,31 +18,47 @@ export function verifyAccessToken(token) {
 
 // Long-lived refresh token, tracked by jti so it can be revoked (logout) and
 // rotated (one-time use) — a stolen refresh token is far less dangerous this way.
-export function issueRefreshToken(user) {
+export async function issueRefreshToken(user) {
   const jti = nanoid(24);
   const token = jwt.sign({}, config.jwt.refreshSecret, {
     subject: user.id,
     jwtid: jti,
     expiresIn: config.jwt.refreshTtl,
   });
-  store.saveRefreshSession(jti, user.id, Date.now() + config.jwt.refreshTtl * 1000);
+  await store.saveRefreshSession(jti, user.id, Date.now() + config.jwt.refreshTtl * 1000);
   return token;
 }
 
-export function verifyRefreshToken(token) {
+export async function verifyRefreshToken(token) {
   const payload = jwt.verify(token, config.jwt.refreshSecret);
-  if (!store.getRefreshSession(payload.jti)) {
+  if (!(await store.getRefreshSession(payload.jti))) {
     throw new Error('Refresh session revoked');
   }
   return payload;
 }
 
 // Rotate: revoke the old jti and mint a fresh refresh token.
-export function rotateRefreshToken(oldPayload, user) {
-  store.revokeRefreshSession(oldPayload.jti);
+export async function rotateRefreshToken(oldPayload, user) {
+  await store.revokeRefreshSession(oldPayload.jti);
   return issueRefreshToken(user);
 }
 
-export function revokeRefreshToken(payload) {
-  if (payload?.jti) store.revokeRefreshSession(payload.jti);
+export async function revokeRefreshToken(payload) {
+  if (payload?.jti) await store.revokeRefreshSession(payload.jti);
+}
+
+// ── Admin web-page session tokens ──
+// A separate `scope: 'admin'` claim means a normal player token can never be
+// used to reach an admin endpoint, even though both are signed with the same key.
+export function signAdminToken(username) {
+  return jwt.sign({ scope: 'admin' }, config.jwt.accessSecret, {
+    subject: `admin:${username}`,
+    expiresIn: config.admin.jwtTtl,
+  });
+}
+
+export function verifyAdminToken(token) {
+  const payload = jwt.verify(token, config.jwt.accessSecret);
+  if (payload.scope !== 'admin') throw new Error('Not an admin token');
+  return payload;
 }

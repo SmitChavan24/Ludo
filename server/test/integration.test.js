@@ -36,20 +36,20 @@ test('a full staked 2-player game escrows, settles, and conserves coins', async 
   const io = fakeIo();
   const manager = new GameManager(io);
 
-  const alice = store.createUser({ provider: 'dev', providerId: 'dev-alice-itest', name: 'Alice' });
-  const bob = store.createUser({ provider: 'dev', providerId: 'dev-bob-itest', name: 'Bob' });
+  const alice = await store.createUser({ provider: 'dev', providerId: 'dev-alice-itest', name: 'Alice' });
+  const bob = await store.createUser({ provider: 'dev', providerId: 'dev-bob-itest', name: 'Bob' });
   await wallet.credit(alice.id, 1000, 'test_seed');
   await wallet.credit(bob.id, 1000, 'test_seed');
 
   const stake = 100;
-  const houseBefore = wallet.houseBalance();
+  const houseBefore = await wallet.houseBalance();
 
-  const room = manager.createRoom(alice, { stake, maxPlayers: 2 });
+  const room = await manager.createRoom(alice, { stake, maxPlayers: 2 });
   await manager.joinRoom(bob, room.id); // fills the room -> game starts -> escrow
 
   // Stakes were escrowed up front.
-  assert.equal(wallet.getBalance(alice.id), 900);
-  assert.equal(wallet.getBalance(bob.id), 900);
+  assert.equal(await wallet.getBalance(alice.id), 900);
+  assert.equal(await wallet.getBalance(bob.id), 900);
   assert.equal(room.pot, 200);
 
   await playToCompletion(manager, room);
@@ -62,11 +62,12 @@ test('a full staked 2-player game escrows, settles, and conserves coins', async 
   const payout = pot - rake;
 
   // Winner: -stake +payout. Loser: -stake. House: +rake. Nothing created/destroyed.
-  assert.equal(wallet.getBalance(winnerId), 1000 - stake + payout);
-  assert.equal(wallet.getBalance(loserId), 1000 - stake);
-  assert.equal(wallet.houseBalance() - houseBefore, rake);
+  assert.equal(await wallet.getBalance(winnerId), 1000 - stake + payout);
+  assert.equal(await wallet.getBalance(loserId), 1000 - stake);
+  const houseAfter = await wallet.houseBalance();
+  assert.equal(houseAfter - houseBefore, rake);
 
-  const totalAfter = wallet.getBalance(alice.id) + wallet.getBalance(bob.id) + (wallet.houseBalance() - houseBefore);
+  const totalAfter = (await wallet.getBalance(alice.id)) + (await wallet.getBalance(bob.id)) + (houseAfter - houseBefore);
   assert.equal(totalAfter, 2000, 'coins must be conserved across the whole game');
 
   // A game-over broadcast with verifiable fairness data must have gone out.
@@ -75,18 +76,18 @@ test('a full staked 2-player game escrows, settles, and conserves coins', async 
   assert.ok(over.payload.fairness.serverSeed, 'fairness reveal must include the server seed');
 });
 
-test('cannot create a game you cannot afford', () => {
+test('cannot create a game you cannot afford', async () => {
   const manager = new GameManager(fakeIo());
-  const broke = store.createUser({ provider: 'dev', providerId: 'dev-broke-itest', name: 'Broke' });
-  assert.throws(() => manager.createRoom(broke, { stake: 100, maxPlayers: 2 }),
+  const broke = await store.createUser({ provider: 'dev', providerId: 'dev-broke-itest', name: 'Broke' });
+  await assert.rejects(() => manager.createRoom(broke, { stake: 100, maxPlayers: 2 }),
     (e) => e.code === 'INSUFFICIENT_FUNDS');
 });
 
 test('cannot join two games at once', async () => {
   const manager = new GameManager(fakeIo());
-  const u = store.createUser({ provider: 'dev', providerId: 'dev-double-itest', name: 'Dub' });
+  const u = await store.createUser({ provider: 'dev', providerId: 'dev-double-itest', name: 'Dub' });
   await wallet.credit(u.id, 1000, 'test_seed');
-  manager.createRoom(u, { stake: 50, maxPlayers: 2 });
-  assert.throws(() => manager.createRoom(u, { stake: 50, maxPlayers: 2 }),
+  await manager.createRoom(u, { stake: 50, maxPlayers: 2 });
+  await assert.rejects(() => manager.createRoom(u, { stake: 50, maxPlayers: 2 }),
     (e) => e.code === 'ALREADY_IN_GAME');
 });

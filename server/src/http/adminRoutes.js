@@ -1,5 +1,8 @@
 import { Router } from 'express';
 import { requireAdmin } from '../middleware/admin.js';
+import { signAdminToken } from '../auth/jwt.js';
+import { safeEqual } from '../util/safeEqual.js';
+import { config } from '../config.js';
 import { wallet } from '../wallet/Wallet.js';
 import { store } from '../db/store.js';
 
@@ -11,6 +14,21 @@ import { store } from '../db/store.js';
 // like any other balance change.
 // ──────────────────────────────────────────────────────────────────────────
 export const adminRouter = Router();
+
+// PUBLIC: admin web-page login. Verifies username + password (constant-time)
+// and issues a short-lived admin JWT used as the Bearer token for everything
+// below. Disabled unless ADMIN_PASSWORD is configured.
+adminRouter.post('/login', (req, res) => {
+  if (!config.admin.password) {
+    return res.status(503).json({ error: 'Admin login is not configured (set ADMIN_PASSWORD).' });
+  }
+  const { username, password } = req.body || {};
+  const ok = safeEqual(username, config.admin.username) && safeEqual(password, config.admin.password);
+  if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
+  res.json({ token: signAdminToken(config.admin.username), expiresIn: config.admin.jwtTtl });
+});
+
+// Everything past this point requires admin auth (admin JWT or x-admin-key).
 adminRouter.use(requireAdmin);
 
 const parseAmount = (v) => {
@@ -19,27 +37,27 @@ const parseAmount = (v) => {
 };
 
 // Confirm an account exists + see its balance and recent ledger before crediting.
-adminRouter.get('/users/:id', (req, res) => {
-  const user = store.getUser(req.params.id);
+adminRouter.get('/users/:id', async (req, res) => {
+  const user = await store.getUser(req.params.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
   res.json({
     user: {
       id: user.id,
       name: user.name,
       email: user.email,
-      coins: wallet.getBalance(user.id),
+      coins: await wallet.getBalance(user.id),
       gamesPlayed: user.gamesPlayed,
       gamesWon: user.gamesWon,
       createdAt: user.createdAt,
     },
-    history: wallet.historyFor(user.id, 20),
+    history: await wallet.historyFor(user.id, 20),
   });
 });
 
 // Credit coins (the CRM top-up after an external payment).
 adminRouter.post('/credit', async (req, res) => {
   const { userId, amount, reason } = req.body || {};
-  if (!userId || !store.getUser(userId)) return res.status(404).json({ error: 'User not found' });
+  if (!userId || !(await store.getUser(userId))) return res.status(404).json({ error: 'User not found' });
   const amt = parseAmount(amount);
   if (!amt) return res.status(400).json({ error: 'amount must be a positive integer' });
 
@@ -51,7 +69,7 @@ adminRouter.post('/credit', async (req, res) => {
 // Debit coins (manual corrections / refunds).
 adminRouter.post('/debit', async (req, res) => {
   const { userId, amount, reason } = req.body || {};
-  if (!userId || !store.getUser(userId)) return res.status(404).json({ error: 'User not found' });
+  if (!userId || !(await store.getUser(userId))) return res.status(404).json({ error: 'User not found' });
   const amt = parseAmount(amount);
   if (!amt) return res.status(400).json({ error: 'amount must be a positive integer' });
 

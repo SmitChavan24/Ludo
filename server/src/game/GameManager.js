@@ -79,7 +79,7 @@ export class GameManager {
 
   // ── lobby / matchmaking ─────────────────────────────────────────────────
 
-  createRoom(user, { stake, maxPlayers = 2, rules = {}, isPrivate = false } = {}) {
+  async createRoom(user, { stake, maxPlayers = 2, rules = {}, isPrivate = false } = {}) {
     this._validateStake(stake);
     if (![2, 3, 4].includes(maxPlayers)) {
       throw new GameError('A game must have 2, 3, or 4 players', 'BAD_MAX_PLAYERS');
@@ -87,7 +87,7 @@ export class GameManager {
     if (this._roomOf(user.id)) {
       throw new GameError('You are already in a game', 'ALREADY_IN_GAME');
     }
-    if (wallet.getBalance(user.id) < stake) {
+    if ((await wallet.getBalance(user.id)) < stake) {
       throw new GameError('Not enough coins for this stake', 'INSUFFICIENT_FUNDS');
     }
 
@@ -123,7 +123,7 @@ export class GameManager {
     if (room.status !== 'waiting') throw new GameError('Game already started', 'ALREADY_STARTED');
     if (room.seats.length >= room.maxPlayers) throw new GameError('Room is full', 'ROOM_FULL');
     if (this._roomOf(user.id)) throw new GameError('You are already in a game', 'ALREADY_IN_GAME');
-    if (wallet.getBalance(user.id) < room.stake) {
+    if ((await wallet.getBalance(user.id)) < room.stake) {
       throw new GameError('Not enough coins for this stake', 'INSUFFICIENT_FUNDS');
     }
 
@@ -160,7 +160,7 @@ export class GameManager {
         return room;
       }
     }
-    const room = this.createRoom(user, { stake, maxPlayers, isPrivate: false });
+    const room = await this.createRoom(user, { stake, maxPlayers, isPrivate: false });
     if (onSeated) onSeated(room);
     return room;
   }
@@ -210,7 +210,7 @@ export class GameManager {
       stake: room.stake,
     });
     for (const uid of userIds) {
-      this._emitUser(uid, 'wallet:balance', { coins: wallet.getBalance(uid) });
+      this._emitUser(uid, 'wallet:balance', { coins: await wallet.getBalance(uid) });
     }
     this._armTurn(room);
   }
@@ -311,15 +311,11 @@ export class GameManager {
     const settle = await wallet.settlePot(room.id, winnerId, room.pot, config.economy.rakeBips);
 
     for (const s of room.seats) {
-      const u = store.getUser(s.userId);
-      if (u) {
-        u.gamesPlayed += 1;
-        if (u.id === winnerId) u.gamesWon += 1;
-      }
+      await store.incrementStats(s.userId, s.userId === winnerId);
     }
 
     const fairness = room.dice.reveal();
-    store.recordGame({
+    await store.recordGame({
       id: room.id,
       stake: room.stake,
       pot: room.pot,
@@ -342,7 +338,7 @@ export class GameManager {
       fairness, // reveal seeds so anyone can verify every roll
     });
     for (const s of room.seats) {
-      this._emitUser(s.userId, 'wallet:balance', { coins: wallet.getBalance(s.userId) });
+      this._emitUser(s.userId, 'wallet:balance', { coins: await wallet.getBalance(s.userId) });
     }
     this._destroyRoom(room, 60_000); // keep briefly so clients can read the result
   }
@@ -356,14 +352,10 @@ export class GameManager {
       const winnerId = remaining[0].userId;
       const settle = await wallet.settlePot(room.id, winnerId, room.pot, config.economy.rakeBips);
       for (const s of room.seats) {
-        const u = store.getUser(s.userId);
-        if (u) {
-          u.gamesPlayed += 1;
-          if (u.id === winnerId) u.gamesWon += 1;
-        }
+        await store.incrementStats(s.userId, s.userId === winnerId);
       }
       const fairness = room.dice.reveal();
-      store.recordGame({
+      await store.recordGame({
         id: room.id,
         stake: room.stake,
         pot: room.pot,
@@ -386,7 +378,7 @@ export class GameManager {
         reason: 'forfeit',
         fairness,
       });
-      this._emitUser(winnerId, 'wallet:balance', { coins: wallet.getBalance(winnerId) });
+      this._emitUser(winnerId, 'wallet:balance', { coins: await wallet.getBalance(winnerId) });
       this._destroyRoom(room, 60_000);
       return;
     }
@@ -404,7 +396,7 @@ export class GameManager {
     room.status = 'finished';
     this._emitRoom(room, 'game:aborted', { reason, refunded: room.stake });
     for (const uid of userIds) {
-      this._emitUser(uid, 'wallet:balance', { coins: wallet.getBalance(uid) });
+      this._emitUser(uid, 'wallet:balance', { coins: await wallet.getBalance(uid) });
     }
     this._destroyRoom(room, 30_000);
   }
