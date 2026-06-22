@@ -36,8 +36,39 @@ coins**. Open a second browser/incognito window, log in as someone else, and hit
 Run the test suite:
 
 ```bash
-npm test          # 20 tests: engine rules, provably-fair dice, full staked game
+npm test          # engine rules, provably-fair dice, full staked game, matchmaking, admin auth
 ```
+
+### Persistence (MySQL)
+
+By default the server uses an **in-memory** backend (great for a quick run, but
+everything resets on restart). To persist users, coins, and game history, point
+it at **MySQL**:
+
+```sql
+CREATE DATABASE coinludo CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'coinludo'@'%' IDENTIFIED BY 'your-strong-password';
+GRANT ALL PRIVILEGES ON coinludo.* TO 'coinludo'@'%';
+FLUSH PRIVILEGES;
+```
+
+Then in `server/.env`:
+
+```ini
+DB_DRIVER=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_USER=coinludo
+DB_PASSWORD=your-strong-password
+DB_NAME=coinludo
+```
+
+Tables are created automatically on first start. The storage layer is behind a
+driver (`db/MemoryStore` ↔ `db/MysqlStore`, `wallet/MemoryWallet` ↔
+`wallet/MysqlWallet`), selected by `DB_DRIVER` — so the test suite stays on the
+fast in-memory backend while production runs on MySQL. **Coin operations use
+real DB transactions + row locks** (`SELECT … FOR UPDATE`), so escrow and
+settlement are atomic even across multiple server instances.
 
 ---
 
@@ -111,10 +142,9 @@ The money path is already abstracted behind `Wallet`. To go live later:
 2. **Deposits/withdrawals:** add a payment provider that only ever calls
    `wallet.credit` (on a verified deposit webhook) and `wallet.debit` (on an
    approved withdrawal). In-game bets stay internal = zero per-game fees.
-3. **Before real money:** swap the in-memory `MemoryStore`/`Wallet` for a
-   transactional database (Postgres) — the interfaces are already DB-shaped —
-   add KYC + withdrawal 2FA, and **get legal advice** (skill-gaming rules vary
-   by Indian state; geo-block where required).
+3. **Before real money:** run on **MySQL** (done — set `DB_DRIVER=mysql`), add
+   KYC + withdrawal 2FA, and **get legal advice** (skill-gaming rules vary by
+   Indian state; geo-block where required).
 
 ---
 
