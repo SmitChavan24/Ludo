@@ -131,36 +131,52 @@ input:focus { border-color: var(--primary); }
 .cell-home.c-yellow { background: var(--yellow); } .cell-home.c-blue { background: var(--blue); }
 .cell-start.c-red { background: var(--red); } .cell-start.c-green { background: var(--green); }
 .cell-start.c-yellow { background: var(--yellow); } .cell-start.c-blue { background: var(--blue); }
-.star { position: absolute; inset: 0; display: grid; place-items: center; font-size: 60%; color: #b6bdd0; }
-.yard-tray { position: absolute; background: var(--card); border-radius: 14px; z-index: 1; }
+.star { position: absolute; inset: 0; display: grid; place-items: center; font-size: 66%; color: #c9a227; }
+.cell-arrow { position: absolute; inset: 0; display: grid; place-items: center; font-size: 80%; line-height: 1; color: rgba(255, 255, 255, .95); }
+.yard-tray { position: absolute; background: rgba(255, 255, 255, .1); border-radius: 16px; z-index: 1; }
+.yard-slot { position: absolute; width: 5%; height: 5%; transform: translate(-50%, -50%); border-radius: 50%; background: rgba(255, 255, 255, .92); z-index: 2; box-sizing: border-box; }
+.yard-slot.c-red { box-shadow: inset 0 0 0 2px var(--red); }
+.yard-slot.c-green { box-shadow: inset 0 0 0 2px var(--green); }
+.yard-slot.c-yellow { box-shadow: inset 0 0 0 2px var(--yellow); }
+.yard-slot.c-blue { box-shadow: inset 0 0 0 2px var(--blue); }
 .center-mark {
   position: absolute; top: 40%; left: 40%; width: 20%; height: 20%; z-index: 1;
   background: conic-gradient(var(--red) 0 25%, var(--blue) 0 50%, var(--yellow) 0 75%, var(--green) 0 100%);
   clip-path: polygon(50% 50%, 0 0, 100% 0, 50% 50%, 100% 100%, 0 100%);
 }
 .token {
-  position: absolute; width: 4.4%; height: 4.4%; border-radius: 50%; z-index: 3;
-  transform: translate(-50%, -50%); border: 2px solid rgba(255, 255, 255, .9);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, .5); padding: 0; cursor: default; transition: top .25s ease, left .25s ease;
+  position: absolute; width: 4.9%; height: 4.9%; border-radius: 50%; z-index: 3;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle at 36% 30%, rgba(255, 255, 255, .8), rgba(255, 255, 255, 0) 46%), var(--tk, #888);
+  border: 2px solid rgba(255, 255, 255, .92);
+  box-shadow: 0 3px 5px rgba(0, 0, 0, .55), inset 0 -3px 4px rgba(0, 0, 0, .32);
+  padding: 0; cursor: default; transition: top .25s ease, left .25s ease;
 }
-.token.c-red { background: var(--red); } .token.c-green { background: var(--green); }
-.token.c-yellow { background: var(--yellow); } .token.c-blue { background: var(--blue); }
+.token.c-red { --tk: var(--red); } .token.c-green { --tk: var(--green); }
+.token.c-yellow { --tk: var(--yellow); } .token.c-blue { --tk: var(--blue); }
 .token-done { opacity: .55; }
-.token-movable { cursor: pointer; animation: bounce .8s infinite; box-shadow: 0 0 0 3px var(--accent), 0 2px 6px rgba(0,0,0,.5); z-index: 4; }
+.token-movable { cursor: pointer; animation: bounce .8s infinite; box-shadow: 0 0 0 3px var(--accent), 0 3px 6px rgba(0,0,0,.55), inset 0 -3px 4px rgba(0,0,0,.32); z-index: 4; }
 @keyframes bounce { 0%,100% { transform: translate(-50%, -50%); } 50% { transform: translate(-50%, -64%); } }
 
 /* ── Action bar / dice ── */
-.action-bar { min-height: 88px; display: grid; place-items: center; }
+.action-bar { min-height: 116px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 6px 0; }
+.action-hint { min-height: 44px; display: flex; align-items: center; justify-content: center; }
 .turn-note { color: var(--muted); font-weight: 600; display: flex; align-items: center; gap: 8px; }
 .turn-note.pulse { color: var(--accent); animation: pulse 1.2s infinite; }
 @keyframes pulse { 50% { opacity: .55; } }
-.dice-area { display: flex; flex-direction: column; align-items: center; gap: 12px; }
-.die { width: 54px; height: 54px; background: #fff; border-radius: 12px; padding: 8px; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); gap: 2px; box-shadow: 0 6px 14px rgba(0,0,0,.4); }
+.die { background: linear-gradient(150deg, #ffffff, #dde3f0); border-radius: 14px; display: grid; place-items: center; border: 1px solid rgba(0, 0, 0, .12); box-shadow: 0 8px 16px rgba(0, 0, 0, .45), inset 0 -4px 6px rgba(0, 0, 0, .14), inset 0 3px 4px rgba(255, 255, 255, .95); }
+/* Inner pip grid sized as a % of the die itself (not the parent) so the dots always have room. */
+.pip-grid { width: 74%; height: 74%; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); gap: 10%; }
 .pip { border-radius: 50%; }
-.pip.on { background: #15182e; }
-.die-rolling { animation: shake .5s infinite; }
-@keyframes shake { 25% { transform: rotate(-12deg); } 75% { transform: rotate(12deg); } }
-.btn-roll { padding: 12px 28px; }
+.pip.on { background: radial-gradient(circle at 35% 32%, #4a5070, #14172b); box-shadow: inset 0 -1px 1px rgba(0, 0, 0, .45); }
+.die-q { font-size: 30px; font-weight: 800; color: #7e84a8; }
+.die-clickable { cursor: pointer; animation: dieInvite 1.5s ease-in-out infinite; box-shadow: 0 8px 16px rgba(0, 0, 0, .45), 0 0 0 3px rgba(108, 92, 231, .5), inset 0 -4px 6px rgba(0, 0, 0, .14), inset 0 3px 4px rgba(255, 255, 255, .95); }
+.die-clickable:hover { transform: translateY(-2px); }
+@keyframes dieInvite { 50% { transform: translateY(-3px); } }
+.die-idle { opacity: .5; }
+.die-rolling { animation: dieTumble .28s linear infinite; }
+@keyframes dieTumble { 0% { transform: rotate(-10deg) translateY(0); } 50% { transform: rotate(10deg) translateY(-6px); } 100% { transform: rotate(-10deg) translateY(0); } }
+.btn-roll { padding: 12px 30px; }
 
 /* ── Waiting ── */
 .waiting { min-height: 70vh; display: grid; place-items: center; }

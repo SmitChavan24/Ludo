@@ -5,6 +5,7 @@ import {
   HOME_COORDS,
   SAFE_CELLS,
   YARD_RECTS,
+  YARD_SLOTS,
   tokenCell,
 } from '../game/coords.js';
 
@@ -18,6 +19,9 @@ for (const c of COLORS) {
   START_AT[`${r},${k}`] = c;
 }
 const SAFE_SET = new Set([...SAFE_CELLS].map((i) => LOOP_COORDS[i].join(',')));
+
+// Direction each colour travels off its start square (classic Ludo arrows).
+const ARROW = { red: '▸', green: '▾', yellow: '◂', blue: '▴' };
 
 function classify(r, c) {
   for (const color of COLORS) {
@@ -46,7 +50,11 @@ export default function LudoBoard({ state, myId, onMove }) {
       cls.push(info.kind === 'path' || info.kind === 'home' ? 'cell-track' : '');
       cells.push(
         <div key={`${r}-${c}`} className={cls.join(' ')}>
-          {info.safe && <span className="star">★</span>}
+          {info.start ? (
+            <span className="cell-arrow">{ARROW[info.start]}</span>
+          ) : (
+            info.safe && <span className="star">★</span>
+          )}
         </div>,
       );
     }
@@ -63,6 +71,17 @@ export default function LudoBoard({ state, myId, onMove }) {
       />
     );
   });
+
+  // The four classic "home slots" (rings) inside each yard.
+  const slots = COLORS.flatMap((color) =>
+    YARD_SLOTS[color].map(([r, c], i) => (
+      <div
+        key={`slot-${color}-${i}`}
+        className={`yard-slot c-${color}`}
+        style={{ top: pct(r + 0.5), left: pct(c + 0.5) }}
+      />
+    )),
+  );
 
   // Whose turn + which token indices may move (only ever the local player's).
   const myTurn = state.currentPlayerId === myId && state.phase === 'awaitingMove';
@@ -109,6 +128,7 @@ export default function LudoBoard({ state, myId, onMove }) {
       <div className="board">
         {cells}
         {trays}
+        {slots}
         <div className="center-mark" />
         {tokens}
       </div>

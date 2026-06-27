@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../store/auth.js';
 import { useGame } from '../store/game.js';
 import { gameApi } from '../api/socket.js';
@@ -11,7 +11,17 @@ export default function Game() {
   const { status, room, state, result } = useGame();
   const setError = useGame((s) => s.setError);
   const reset = useGame((s) => s.reset);
+  const lastRoll = useGame((s) => s.lastRoll);
   const [copied, setCopied] = useState(false);
+  const [rolling, setRolling] = useState(false);
+  const [rollFace, setRollFace] = useState(1);
+
+  // While "rolling", flick through random faces so the die tumbles naturally.
+  useEffect(() => {
+    if (!rolling) return;
+    const t = setInterval(() => setRollFace(1 + Math.floor(Math.random() * 6)), 90);
+    return () => clearInterval(t);
+  }, [rolling]);
 
   const myId = user.id;
 
@@ -78,13 +88,20 @@ export default function Game() {
   const canRoll = isMyTurn && state.phase === 'awaitingRoll';
   const mustMove = isMyTurn && state.phase === 'awaitingMove';
   const currentPlayer = state.players.find((p) => p.id === state.currentPlayerId);
+  // The die always shows *something*: a live tumble while rolling, otherwise the
+  // last value rolled (so it never falls back to an empty white box).
+  const dieValue = rolling ? rollFace : state.lastDie ?? lastRoll;
 
   const onRoll = async () => {
+    if (rolling) return;
+    setRolling(true);
     try {
       await gameApi.roll();
     } catch (e) {
       setError(e.message);
     }
+    // Let the tumble play briefly, then settle on the server's result.
+    setTimeout(() => setRolling(false), 600);
   };
   const onMove = async (tokenIndex) => {
     try {
@@ -120,17 +137,19 @@ export default function Game() {
       <LudoBoard state={state} myId={myId} onMove={onMove} />
 
       <div className="action-bar">
+        <Dice
+          value={dieValue}
+          rolling={rolling}
+          idle={!canRoll && !mustMove}
+          onRoll={canRoll && !rolling ? onRoll : undefined}
+        />
         {state.status === 'finished' ? (
-          <div className="turn-note">Game over</div>
-        ) : canRoll ? (
-          <Dice value={state.lastDie} onRoll={onRoll} label="Roll Dice" />
-        ) : mustMove ? (
-          <div className="turn-note pulse">🎲 {state.lastDie} — tap a glowing token</div>
-        ) : (
-          <div className="turn-note">
+          <span className="turn-note">Game over</span>
+        ) : !isMyTurn ? (
+          <span className="turn-note">
             <span className={`dot c-${currentPlayer?.color}`} /> {currentPlayer?.name}&rsquo;s turn…
-          </div>
-        )}
+          </span>
+        ) : null}
       </div>
 
       {status === 'finished' && result && (
