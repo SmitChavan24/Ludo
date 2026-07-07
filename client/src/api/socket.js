@@ -12,7 +12,8 @@ export function getSocket() {
 // Connect (authenticated by JWT) and route every server event into the stores.
 export function connectSocket(token) {
   if (socket) socket.disconnect();
-  socket = io(SERVER_URL, { auth: { token }, transports: ['websocket'] });
+  // Empty SERVER_URL (production build) → connect to the current origin.
+  socket = io(SERVER_URL || undefined, { auth: { token }, transports: ['websocket'] });
 
   const g = () => useGame.getState();
 
@@ -54,10 +55,19 @@ function emitAck(event, payload) {
   });
 }
 
+// A fresh random seed the player contributes to each game's provably-fair dice.
+// Because the server publishes its seed hash before the game starts, this seed
+// stops the operator from pre-selecting favourable rolls.
+function randomSeed() {
+  const a = new Uint8Array(16);
+  (globalThis.crypto || window.crypto).getRandomValues(a);
+  return Array.from(a, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 export const gameApi = {
-  quick: (stake, maxPlayers) => emitAck('lobby:quick', { stake, maxPlayers }),
-  create: (stake, maxPlayers) => emitAck('lobby:create', { stake, maxPlayers }),
-  join: (roomId) => emitAck('lobby:join', { roomId }),
+  quick: (stake, maxPlayers) => emitAck('lobby:quick', { stake, maxPlayers, clientSeed: randomSeed() }),
+  create: (stake, maxPlayers) => emitAck('lobby:create', { stake, maxPlayers, clientSeed: randomSeed() }),
+  join: (roomId) => emitAck('lobby:join', { roomId, clientSeed: randomSeed() }),
   leave: () => emitAck('lobby:leave', {}),
   roll: () => emitAck('game:roll', {}),
   move: (tokenIndex) => emitAck('game:move', { tokenIndex }),

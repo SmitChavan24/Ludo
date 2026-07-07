@@ -43,6 +43,7 @@ export class LudoEngine {
       seatIndex,
       finished: false,
       finishedAt: null,
+      eliminated: false, // left/forfeited mid-game — skipped in turn order
       tokens: Array.from({ length: TOKENS_PER_PLAYER }, () => ({
         state: 'yard', // 'yard' | 'active' | 'home'
         steps: -1,
@@ -71,7 +72,7 @@ export class LudoEngine {
   }
 
   _activePlayers() {
-    return this.players.filter((p) => !p.finished);
+    return this.players.filter((p) => !p.finished && !p.eliminated);
   }
 
   // ── move generation ─────────────────────────────────────────────────────
@@ -80,12 +81,15 @@ export class LudoEngine {
   // any captures that would result. This is the allow-list the engine enforces.
   _legalMovesFor(player, die) {
     const moves = [];
+    const blockades = this.rules.blockades ? this._blockadeCells() : null;
+
     player.tokens.forEach((token, tokenIndex) => {
       if (token.state === 'home') return;
 
       if (token.state === 'yard') {
-        // A token can only leave the yard on a 6.
-        if (die === 6) {
+        // A token can only leave the yard on a 6, unless a blockade guards its
+        // own start square.
+        if (die === 6 && !(blockades && this._pathBlocked(player, -1, 0, blockades))) {
           moves.push({
             tokenIndex,
             fromStep: -1,
@@ -96,9 +100,10 @@ export class LudoEngine {
         return;
       }
 
-      // Active token: it may move only if it does not overshoot home.
+      // Active token: it may move only if it does not overshoot home and no
+      // opponent blockade lies in its path.
       const toStep = token.steps + die;
-      if (toStep <= HOME_STEP) {
+      if (toStep <= HOME_STEP && !(blockades && this._pathBlocked(player, token.steps, toStep, blockades))) {
         moves.push({
           tokenIndex,
           fromStep: token.steps,
@@ -108,6 +113,40 @@ export class LudoEngine {
       }
     });
     return moves;
+  }
+
+  // Loop cells where one player has ≥2 active tokens (a blockade). Safe cells,
+  // where tokens of different colours may coexist, never count.
+  _blockadeCells() {
+    const perCell = new Map(); // cell -> { color: count }
+    for (const p of this.players) {
+      for (const token of p.tokens) {
+        if (token.state !== 'active' || token.steps > MAIN_PATH_STEPS - 1) continue;
+        const cell = globalCell(p.color, token.steps);
+        if (SAFE_CELLS.has(cell)) continue;
+        const counts = perCell.get(cell) || {};
+        counts[p.color] = (counts[p.color] || 0) + 1;
+        perCell.set(cell, counts);
+      }
+    }
+    const blocks = new Map(); // cell -> owning color
+    for (const [cell, counts] of perCell) {
+      for (const [color, n] of Object.entries(counts)) {
+        if (n >= 2) blocks.set(cell, color);
+      }
+    }
+    return blocks;
+  }
+
+  // Does an OPPONENT blockade sit on any loop cell the token enters moving from
+  // `fromStep` (exclusive) to `toStep` (inclusive)? Home-column steps can't hold
+  // a blockade, so we only scan the shared loop.
+  _pathBlocked(player, fromStep, toStep, blockades) {
+    for (let k = fromStep + 1; k <= toStep && k <= MAIN_PATH_STEPS - 1; k++) {
+      const owner = blockades.get(globalCell(player.color, k));
+      if (owner && owner !== player.color) return true;
+    }
+    return false;
   }
 
   // Opponent tokens that would be sent home if `player` lands on `toStep`.
@@ -141,7 +180,8 @@ export class LudoEngine {
     const n = this.turnOrder.length;
     for (let i = 1; i <= n; i++) {
       const idx = (this.turnIndex + i) % n;
-      if (!this.getPlayer(this.turnOrder[idx]).finished) {
+      const player = this.getPlayer(this.turnOrder[idx]);
+      if (!player.finished && !player.eliminated) {
         this.turnIndex = idx;
         return;
       }
@@ -287,6 +327,44 @@ export class LudoEngine {
     return { skipped: playerId, reason };
   }
 
+  // Remove a player from the game (they left / forfeited / disconnected). Their
+  // tokens come off the board and their turns are skipped. If only one player is
+  // left standing, the game ends and that player wins.
+  // Returns { gameOver, winnerId } or null if the player wasn't in play.
+  eliminatePlayer(playerId) {
+    if (this.phase === 'finished') return null;
+    const player = this.getPlayer(playerId);
+    if (!player || player.finished || player.eliminated) return null;
+
+    player.eliminated = true;
+    player.tokens.forEach((t) => {
+      t.state = 'yard';
+      t.steps = -1;
+    });
+    this.version += 1;
+    this._log({ type: 'eliminated', playerId });
+
+    const active = this._activePlayers();
+    if (active.length <= 1) {
+      // Last player standing wins the whole pot.
+      if (active.length === 1 && !this.winners.includes(active[0].id)) {
+        this.winners.unshift(active[0].id);
+      }
+      for (const p of this.players) {
+        if (!this.winners.includes(p.id)) this.winners.push(p.id);
+      }
+      this.phase = 'finished';
+      this.legalMoves = [];
+      this.lastDie = null;
+      this._log({ type: 'gameOver', winners: this.winners, reason: 'forfeit' });
+      return { gameOver: true, winnerId: this.winners[0] };
+    }
+
+    // Still going: if it was their turn, move on to the next player.
+    if (this.currentPlayerId() === playerId) this._advanceTurn();
+    return { gameOver: false, winnerId: null };
+  }
+
   // ── serialization ─────────────────────────────────────────────────────────
 
   // The full board, safe to broadcast to every player in the room. It contains
@@ -310,6 +388,7 @@ export class LudoEngine {
         seatIndex: p.seatIndex,
         finished: p.finished,
         finishedAt: p.finishedAt,
+        eliminated: p.eliminated,
         tokens: p.tokens.map((t) => ({
           state: t.state,
           steps: t.steps,

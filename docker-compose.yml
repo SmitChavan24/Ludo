@@ -1,0 +1,50 @@
+# One command to run the whole stack: MySQL + the app (API + sockets + client).
+# Provide secrets in a root `.env` file (see DEPLOY.md). Then: docker compose up -d
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: coinludo
+      MYSQL_USER: coinludo
+      MYSQL_PASSWORD: ${DB_PASSWORD:-changeme}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-changeme-root}
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost', '-p$$MYSQL_ROOT_PASSWORD']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: '4000'
+      SERVE_CLIENT: 'true'
+      # For a real domain put it here (used for socket CORS); same-origin needs nothing.
+      CLIENT_ORIGINS: ${CLIENT_ORIGINS:-http://localhost:4000}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in .env}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ALLOW_DEV_LOGIN: ${ALLOW_DEV_LOGIN:-false}
+      RAKE_BIPS: ${RAKE_BIPS:-500}
+      DB_DRIVER: mysql
+      DB_HOST: db
+      DB_PORT: '3306'
+      DB_USER: coinludo
+      DB_PASSWORD: ${DB_PASSWORD:-changeme}
+      DB_NAME: coinludo
+    ports:
+      - '${APP_PORT:-4000}:4000'
+
+volumes:
+  db-data:

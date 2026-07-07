@@ -62,9 +62,9 @@ export const DEFAULT_RULES = {
   extraTurnOnCapture: true,
   // Sending one of your own tokens home grants another roll.
   extraTurnOnReachHome: true,
-  // Two same-colour tokens on one loop cell form a blockade opponents cannot
-  // pass or capture. Off by default to keep v1 simple; the engine has a hook.
-  blockades: false,
+  // Two same-colour tokens on one (non-safe) loop cell form a blockade that
+  // opponents can neither pass nor land on — the classic Ludo block.
+  blockades: true,
 };
 
 // Compute the global loop cell index for a given colour + steps.

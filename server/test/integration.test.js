@@ -11,6 +11,7 @@ function fakeIo() {
   return {
     events,
     to: () => ({ emit: (event, payload) => events.push({ event, payload }) }),
+    in: () => ({ socketsLeave: () => {} }),
   };
 }
 
@@ -90,4 +91,42 @@ test('cannot join two games at once', async () => {
   await manager.createRoom(u, { stake: 50, maxPlayers: 2 });
   await assert.rejects(() => manager.createRoom(u, { stake: 50, maxPlayers: 2 }),
     (e) => e.code === 'ALREADY_IN_GAME');
+});
+
+test('leaving a 2-player game forfeits the pot to the opponent', async () => {
+  const manager = new GameManager(fakeIo());
+  const a = await store.createUser({ provider: 'dev', providerId: 'ff-a-itest', name: 'FA' });
+  const b = await store.createUser({ provider: 'dev', providerId: 'ff-b-itest', name: 'FB' });
+  await wallet.credit(a.id, 1000, 'test_seed');
+  await wallet.credit(b.id, 1000, 'test_seed');
+
+  const room = await manager.createRoom(a, { stake: 100, maxPlayers: 2 });
+  await manager.joinRoom(b, room.id); // starts + escrows 100 each
+
+  await manager.handleLeave(a.id); // a forfeits
+
+  const rake = Math.floor((200 * config.economy.rakeBips) / 10000);
+  assert.equal(room.status, 'finished');
+  assert.equal(await wallet.getBalance(b.id), 1000 - 100 + (200 - rake), 'opponent wins the pot');
+  assert.equal(await wallet.getBalance(a.id), 1000 - 100, 'forfeiter loses their stake');
+  // a is freed to play again; the room is settled.
+  assert.equal(manager._roomOf(a.id), null);
+});
+
+test('a player who cannot cover the stake at start is ejected, room stays open', async () => {
+  const manager = new GameManager(fakeIo());
+  const a = await store.createUser({ provider: 'dev', providerId: 'esc-a-itest', name: 'EA' });
+  const b = await store.createUser({ provider: 'dev', providerId: 'esc-b-itest', name: 'EB' });
+  await wallet.credit(a.id, 1000, 'test_seed');
+  await wallet.credit(b.id, 1000, 'test_seed');
+
+  const room = await manager.createRoom(a, { stake: 100, maxPlayers: 2 });
+  await wallet.debit(a.id, 950, 'spent'); // a now has 50, below the 100 stake
+  await manager.joinRoom(b, room.id); // fills -> start pre-check ejects a
+
+  assert.equal(room.status, 'waiting', 'room reopens instead of deadlocking full');
+  assert.equal(room.seats.length, 1);
+  assert.equal(room.seats[0].userId, b.id);
+  assert.equal(manager._roomOf(a.id), null, 'ejected player is freed');
+  assert.equal(await wallet.getBalance(b.id), 1000, 'no escrow happened for the remaining player');
 });

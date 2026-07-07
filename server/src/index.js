@@ -1,5 +1,6 @@
 import http from 'node:http';
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { Server as SocketServer } from 'socket.io';
@@ -20,9 +21,25 @@ app.use('/api', apiLimiter, router);
 app.use('/api/admin', authLimiter, adminRouter); // CRM/admin — admin JWT or x-admin-key
 
 // Static admin web page (JWT-protected UI for coin top-ups), served at /admin.
-const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
+const srcDir = path.dirname(fileURLToPath(import.meta.url));
+const publicDir = path.join(srcDir, '..', 'public');
 app.use(express.static(publicDir));
 app.get('/admin', (req, res) => res.sendFile(path.join(publicDir, 'admin.html')));
+
+// In production, serve the built client (same origin) with an SPA fallback.
+if (config.serveClient) {
+  const clientDist = config.clientDist || path.join(srcDir, '..', '..', 'client', 'dist');
+  if (fs.existsSync(clientDist)) {
+    app.use(express.static(clientDist));
+    app.get('*', (req, res, next) => {
+      if (req.path.startsWith('/api') || req.path.startsWith('/admin') || req.path.startsWith('/socket.io')) return next();
+      res.sendFile(path.join(clientDist, 'index.html'));
+    });
+    console.log(`   Serving client from ${clientDist}`);
+  } else {
+    console.warn(`[client] SERVE_CLIENT is on but ${clientDist} does not exist (run the client build).`);
+  }
+}
 
 const server = http.createServer(app);
 

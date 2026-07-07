@@ -37,6 +37,10 @@ export const config = {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
+  // In production the Node server also serves the built client (same origin),
+  // so no separate web server is needed. Override with SERVE_CLIENT.
+  serveClient: process.env.SERVE_CLIENT ? process.env.SERVE_CLIENT === 'true' : isProd,
+  clientDist: process.env.CLIENT_DIST || null,
   jwt: {
     accessSecret: secret('JWT_ACCESS_SECRET'),
     refreshSecret: secret('JWT_REFRESH_SECRET'),
@@ -72,5 +76,13 @@ export const config = {
     dailyBonus: int('DAILY_BONUS_COINS', 100),
     rakeBips: int('RAKE_BIPS', 500),
     turnTimeoutMs: int('TURN_TIMEOUT_MS', 30000),
+    // Grace after a disconnect before the player forfeits (allows quick reconnects).
+    disconnectGraceMs: int('DISCONNECT_GRACE_MS', 25000),
+  },
+  // Per-socket event flood protection. Generous vs. real play (a human sends a
+  // few events per turn); anything above this is abuse, not gameplay.
+  socketRate: {
+    windowMs: int('SOCKET_RATE_WINDOW_MS', 1000),
+    max: int('SOCKET_RATE_MAX', 60),
   },
 };

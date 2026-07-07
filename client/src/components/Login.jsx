@@ -7,32 +7,46 @@ export default function Login() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const loginDev = useAuth((s) => s.loginDev);
-  const loginGoogle = useAuth((s) => s.loginGoogle);
   const googleBtn = useRef(null);
 
   // Render the real Google Sign-In button only if a client id is configured.
   useEffect(() => {
     if (!GOOGLE_CLIENT_ID) return;
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.onload = () => {
-      if (!window.google || !googleBtn.current) return;
-      window.google.accounts.id.initialize({
-        client_id: GOOGLE_CLIENT_ID,
-        callback: async ({ credential }) => {
-          try {
-            await loginGoogle(credential);
-          } catch (e) {
-            setErr(e.message);
-          }
-        },
-      });
+
+    const setup = () => {
+      if (!window.google?.accounts || !googleBtn.current) return;
+      // Guard: StrictMode/dev remounts must not re-initialize GSI.
+      if (!window.__gsiInit) {
+        window.google.accounts.id.initialize({
+          client_id: GOOGLE_CLIENT_ID,
+          callback: async ({ credential }) => {
+            try {
+              await useAuth.getState().loginGoogle(credential);
+            } catch (e) {
+              setErr(e.message);
+            }
+          },
+        });
+        window.__gsiInit = true;
+      }
+      googleBtn.current.replaceChildren();
       window.google.accounts.id.renderButton(googleBtn.current, { theme: 'filled_blue', size: 'large', width: 280 });
     };
-    document.body.appendChild(script);
-    return () => script.remove();
-  }, [loginGoogle]);
+
+    // Reuse the GSI script if a previous mount already added it.
+    const existing = document.querySelector('script[src^="https://accounts.google.com/gsi/client"]');
+    if (window.google?.accounts) {
+      setup();
+    } else if (existing) {
+      existing.addEventListener('load', setup, { once: true });
+    } else {
+      const script = document.createElement('script');
+      script.src = 'https://accounts.google.com/gsi/client';
+      script.async = true;
+      script.onload = setup;
+      document.body.appendChild(script);
+    }
+  }, []);
 
   const handleDev = async (e) => {
     e.preventDefault();

@@ -55,21 +55,39 @@ export function rollFromSeeds(serverSeed, clientSeed, nonce) {
 
 // A small stateful helper a game holds onto: keeps the secret seed, exposes the
 // commitment, and increments the nonce for each roll.
+//
+// The server seed is committed the instant the object is created (typically when
+// the room OPENS). The client seed is contributed by the PLAYERS and finalized
+// later (at game start) — after the serverSeedHash is already public. That
+// ordering is what makes it trustless: the operator can't have chosen a server
+// seed to suit a client seed it hadn't seen yet.
 export class ProvablyFairDice {
   constructor(clientSeed = '') {
     this.serverSeed = createServerSeed();
     this.serverSeedHash = hashServerSeed(this.serverSeed);
-    this.clientSeed = clientSeed || crypto.randomBytes(8).toString('hex');
+    this.clientSeed = '';
+    this.finalized = false;
     this.nonce = 0;
+    if (clientSeed) this.setClientSeed(clientSeed);
   }
 
-  // The public commitment shown to players at game start.
+  // Lock in the (player-contributed) client seed. Called once, at game start.
+  setClientSeed(seed) {
+    if (this.finalized) return this.clientSeed;
+    this.clientSeed = (seed && String(seed).slice(0, 256)) || crypto.randomBytes(8).toString('hex');
+    this.finalized = true;
+    return this.clientSeed;
+  }
+
+  // The public commitment. `serverSeedHash` is available from creation; the
+  // `clientSeed` is filled in once finalized.
   commitment() {
     return { serverSeedHash: this.serverSeedHash, clientSeed: this.clientSeed };
   }
 
   // Produce the next die value and advance the nonce.
   roll() {
+    if (!this.finalized) this.setClientSeed(''); // never roll unseeded
     const value = rollFromSeeds(this.serverSeed, this.clientSeed, this.nonce);
     this.nonce += 1;
     return value;

@@ -11,6 +11,7 @@ export const useGame = create((set) => ({
   lastRoll: null,
   lastEvent: null, // {type:'roll'|'move'|'skip', ...} — for animation/toasts
   result: null, // game:over / game:aborted payload
+  turnTimeoutMs: 30000, // how long a player has to act before auto-skip
   error: null,
 
   setRoom(room) {
@@ -23,12 +24,13 @@ export const useGame = create((set) => ({
       room: snap.room,
       state: snap.state,
       commitment: snap.commitment,
+      turnTimeoutMs: snap.turnTimeoutMs || 30000,
       status: snap.state ? (snap.state.status === 'finished' ? 'finished' : 'playing') : 'waiting',
     });
   },
 
-  onGameStart({ room, state, commitment }) {
-    set({ room, state, commitment, status: 'playing', result: null, lastRoll: null, lastEvent: null });
+  onGameStart({ room, state, commitment, turnTimeoutMs }) {
+    set({ room, state, commitment, turnTimeoutMs: turnTimeoutMs || 30000, status: 'playing', result: null, lastRoll: null, lastEvent: null });
   },
 
   onRolled({ die, result, state }) {

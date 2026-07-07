@@ -102,7 +102,12 @@ input:focus { border-color: var(--primary); }
 .game-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .pot-chip { background: #2a2a18; color: var(--accent); border-radius: 999px; padding: 8px 14px; font-weight: 800; }
 .players-bar { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
-.player-chip { display: flex; align-items: center; gap: 8px; background: var(--card); border: 1.5px solid var(--line); border-radius: 14px; padding: 8px 10px; }
+.player-chip { position: relative; overflow: hidden; display: flex; align-items: center; gap: 8px; background: var(--card); border: 1.5px solid var(--line); border-radius: 14px; padding: 8px 10px; }
+.turn-timer { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255, 255, 255, .08); }
+.turn-timer-fill { height: 100%; background: var(--accent); transition: width .12s linear; }
+.turn-timer-fill.low { background: var(--red); }
+.top-right { display: flex; align-items: center; gap: 8px; }
+.mute-btn { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 9px; font-size: 14px; cursor: pointer; line-height: 1; }
 .player-chip.turn { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(255, 210, 63, .15); }
 .pc-meta { flex: 1; min-width: 0; }
 .pc-name { font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -243,6 +248,13 @@ input:focus { border-color: var(--primary); }
 .lb-meta { flex: 1; min-width: 0; }
 .lb-name { font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lb-sub { color: var(--muted); font-size: 11px; }
+
+/* ── Confirm dialog (leave/forfeit) ── */
+.btn-danger { background: var(--red); }
+.confirm-card { background: var(--card); border: 1px solid var(--line); border-radius: 24px; padding: 26px 22px; text-align: center; width: 100%; max-width: 340px; }
+.confirm-card h2 { margin: 8px 0; }
+.confirm-actions { display: flex; gap: 10px; margin-top: 18px; }
+.confirm-actions .btn { flex: 1; }
 
 .hist-row { display: flex; align-items: center; gap: 12px; background: var(--bg-2); border-radius: 12px; padding: 10px 12px; }
 .hist-badge { font-size: 10px; font-weight: 800; padding: 4px 8px; border-radius: 6px; letter-spacing: .5px; }

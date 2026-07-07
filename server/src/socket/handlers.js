@@ -1,6 +1,19 @@
 import { verifyAccessToken } from '../auth/jwt.js';
 import { store } from '../db/store.js';
 import { GameError } from '../game/LudoEngine.js';
+import { config } from '../config.js';
+
+// Cheap per-socket sliding-window flood guard. Legit play is a handful of events
+// per turn, so a generous cap blocks abuse without ever tripping real players.
+function rateLimited(socket) {
+  const now = Date.now();
+  const rl = socket.data.rl;
+  if (now > rl.resetAt) {
+    rl.count = 0;
+    rl.resetAt = now + config.socketRate.windowMs;
+  }
+  return ++rl.count > config.socketRate.max;
+}
 
 // Wire up the real-time layer. Every socket is authenticated at the handshake,
 // and every handler is validated and wrapped so a malformed/hostile message can
@@ -23,6 +36,7 @@ export function registerSocketHandlers(io, manager) {
 
   io.on('connection', (socket) => {
     const user = socket.data.user;
+    socket.data.rl = { count: 0, resetAt: Date.now() + config.socketRate.windowMs };
     socket.join(`user:${user.id}`);
     manager.markConnected(user.id, true);
 
@@ -33,9 +47,15 @@ export function registerSocketHandlers(io, manager) {
       socket.emit('game:sync', snap);
     }
 
-    // Turn a handler into a safe, ack-able listener.
+    // Turn a handler into a safe, ack-able, rate-limited listener.
     const on = (event, fn) =>
       socket.on(event, async (payload, ack) => {
+        if (rateLimited(socket)) {
+          const clean = { code: 'RATE_LIMIT', message: 'Too many actions — slow down.' };
+          socket.emit('error', clean);
+          if (typeof ack === 'function') ack({ ok: false, error: clean });
+          return;
+        }
         try {
           const result = await fn(payload || {});
           if (typeof ack === 'function') ack({ ok: true, ...(result || {}) });
@@ -52,23 +72,23 @@ export function registerSocketHandlers(io, manager) {
     const joinSocketRoom = (room) => socket.join(`room:${room.id}`);
 
     // Private friend room — joined by code, never matched into randomly.
-    on('lobby:create', async ({ stake, maxPlayers, rules }) => {
-      const room = await manager.createRoom(user, { stake, maxPlayers, rules, isPrivate: true });
+    on('lobby:create', async ({ stake, maxPlayers, rules, clientSeed }) => {
+      const room = await manager.createRoom(user, { stake, maxPlayers, rules, isPrivate: true, clientSeed });
       joinSocketRoom(room);
       socket.emit('room:update', manager.serializeRoom(room));
       return { roomId: room.id };
     });
 
-    on('lobby:join', async ({ roomId }) => {
+    on('lobby:join', async ({ roomId, clientSeed }) => {
       // joinSocketRoom runs the instant the seat is taken, before any
       // game:start broadcast, so this client never misses the kickoff.
-      const room = await manager.joinRoom(user, roomId, joinSocketRoom);
+      const room = await manager.joinRoom(user, roomId, joinSocketRoom, clientSeed);
       return { roomId: room.id };
     });
 
     // Random matchmaking at a chosen stake + player count.
-    on('lobby:quick', async ({ stake, maxPlayers }) => {
-      const room = await manager.quickMatch(user, stake, maxPlayers || 2, joinSocketRoom);
+    on('lobby:quick', async ({ stake, maxPlayers, clientSeed }) => {
+      const room = await manager.quickMatch(user, stake, maxPlayers || 2, joinSocketRoom, clientSeed);
       socket.emit('room:update', manager.serializeRoom(room));
       return { roomId: room.id };
     });
