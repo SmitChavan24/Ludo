@@ -17,7 +17,12 @@ export function connectSocket(token) {
 
   const g = () => useGame.getState();
 
-  socket.on('connect_error', (err) => g().setError(err.message));
+  socket.on('connect', () => g().setConnected(true));
+  socket.on('disconnect', () => g().setConnected(false));
+  socket.on('connect_error', (err) => {
+    g().setConnected(false);
+    g().setError(err.message);
+  });
   socket.on('error', (err) => g().setError(err?.message || err?.code || 'Error'));
 
   socket.on('room:update', (room) => g().setRoom(room));
@@ -33,6 +38,7 @@ export function connectSocket(token) {
   socket.on('game:aborted', (p) => g().onAborted(p));
 
   socket.on('wallet:balance', ({ coins }) => useAuth.getState().setCoins(coins));
+  socket.on('presence', (p) => g().setPresence(p));
 
   return socket;
 }
@@ -45,10 +51,25 @@ export function disconnectSocket() {
 }
 
 // Promise-based emit using socket.io acks, so callers can await + catch errors.
-function emitAck(event, payload) {
+// Every request carries a timeout. Without one, emitting while the socket is
+// down just buffers the packet and the promise hangs forever — the UI would sit
+// on a spinner with no explanation.
+function emitAck(event, payload, timeoutMs = 10000) {
   return new Promise((resolve, reject) => {
-    if (!socket) return reject(new Error('Not connected'));
+    if (!socket) return reject(new Error('Not connected to the server'));
+    if (!socket.connected) return reject(new Error('Reconnecting to the server — try again in a moment'));
+
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error('The server did not respond. Please try again.'));
+    }, timeoutMs);
+
     socket.emit(event, payload, (res) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       if (res && res.ok === false) reject(new Error(res.error?.message || 'Request failed'));
       else resolve(res);
     });
@@ -66,6 +87,7 @@ function randomSeed() {
 
 export const gameApi = {
   quick: (stake, maxPlayers) => emitAck('lobby:quick', { stake, maxPlayers, clientSeed: randomSeed() }),
+  practice: () => emitAck('lobby:practice', { clientSeed: randomSeed() }),
   create: (stake, maxPlayers) => emitAck('lobby:create', { stake, maxPlayers, clientSeed: randomSeed() }),
   join: (roomId) => emitAck('lobby:join', { roomId, clientSeed: randomSeed() }),
   leave: () => emitAck('lobby:leave', {}),

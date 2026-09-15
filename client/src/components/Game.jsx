@@ -19,11 +19,18 @@ export default function Game() {
   const [rolling, setRolling] = useState(false);
   const [rollFace, setRollFace] = useState(1);
   const [confirmLeave, setConfirmLeave] = useState(false);
+  const [botIn, setBotIn] = useState(null); // seconds until the practice bot joins
   const [muted, setMuted] = useState(isMuted());
   const [turnFrac, setTurnFrac] = useState(1);
   const turnStartRef = useRef(Date.now());
 
   const myId = user.id;
+  // The server ranks the table after every move; the client only renders it.
+  const rankOf = Object.fromEntries((state?.standings || []).map((r) => [r.playerId, r]));
+  const ordinal = (n) => ['1st', '2nd', '3rd', '4th'][n - 1] || `${n}th`;
+  const isPractice = !!room?.isPractice;
+  // Practice is anonymous: never show a name, just who's who.
+  const label = (p) => (isPractice ? (p.id === myId ? 'You' : 'Computer') : `${p.name}${p.id === myId ? ' (you)' : ''}`);
 
   // While "rolling", flick through random faces so the die tumbles naturally.
   useEffect(() => {
@@ -31,6 +38,21 @@ export default function Game() {
     const t = setInterval(() => setRollFace(1 + Math.floor(Math.random() * 6)), 90);
     return () => clearInterval(t);
   }, [rolling]);
+
+  // Practice: count down to the moment a bot fills the table. The server sends
+  // the REMAINING time, which we anchor to the local clock so skew can't skew it.
+  useEffect(() => {
+    const ms = room?.botJoinsInMs;
+    if (!(room?.isPractice && typeof ms === 'number' && status === 'waiting')) {
+      setBotIn(null);
+      return;
+    }
+    const deadline = Date.now() + ms;
+    const tick = () => setBotIn(Math.max(0, Math.ceil((deadline - Date.now()) / 1000)));
+    tick();
+    const iv = setInterval(tick, 250);
+    return () => clearInterval(iv);
+  }, [room?.id, room?.botJoinsInMs, room?.isPractice, status]);
 
   // Turn countdown: reset on every state change, tick toward the auto-skip.
   useEffect(() => {
@@ -89,11 +111,29 @@ export default function Game() {
   // Leaving mid-game forfeits the stake, so confirm first. Cancelling a waiting
   // room (or an already-finished game) costs nothing, so just leave.
   const requestLeave = () => {
-    if (status === 'playing' && state && state.status !== 'finished') setConfirmLeave(true);
+    if (!isPractice && status === 'playing' && state && state.status !== 'finished') setConfirmLeave(true);
+    else if (user?.isGuest) exitPractice();
     else leave();
   };
 
-  const onAgain = () => reset();
+  // "Play another practice game" — an explicit new request.
+  const onAgain = () => {
+    reset();
+    if (user?.isGuest) useGame.getState().requestPractice();
+  };
+
+  // Cancelling/leaving a practice game drops the guest on the practice home
+  // screen — NOT back into matchmaking (that made Cancel look broken), and not
+  // signed out either, so replaying is one tap.
+  const exitPractice = async () => {
+    try {
+      await gameApi.leave();
+    } catch {
+      /* room may already be gone */
+    }
+    useGame.getState().clearPendingPractice();
+    reset();
+  };
 
   // ── Waiting room (no game state yet) ──
   if (status === 'waiting' || !state) {
@@ -110,11 +150,31 @@ export default function Game() {
       <div className="game waiting">
         <div className="waiting-card">
           <div className="spinner" />
-          <h2>{isPrivate ? 'Waiting for friends…' : 'Finding players…'}</h2>
+          <h2>{room?.isPractice ? 'Finding an opponent…' : isPrivate ? 'Waiting for friends…' : 'Finding players…'}</h2>
           <p className="result-sub">
-            Stake 🪙 {room?.stake} · {seats.length}/{room?.maxPlayers} joined
-            {need > 0 && ` · need ${need} more`}
+            {room?.isPractice
+              ? botIn === null
+                ? 'Looking for a real opponent…'
+                : botIn > 0
+                  ? 'Looking for a real opponent…'
+                  : 'Starting your game…'
+              : `Stake 🪙 ${room?.stake} · ${seats.length}/${room?.maxPlayers} joined${need > 0 ? ` · need ${need} more` : ''}`}
           </p>
+
+          {room?.isPractice && botIn !== null && (
+            <div className="bot-countdown">
+              <div className="bot-count-num">{botIn > 0 ? botIn : '—'}</div>
+              <div className="bot-count-label">
+                {botIn > 0 ? 'Computer joins in seconds' : 'Computer is joining…'}
+              </div>
+              <div className="bot-count-bar">
+                <div
+                  className="bot-count-fill"
+                  style={{ width: `${Math.min(100, Math.max(0, (botIn / Math.max(1, Math.round((room.botJoinsInMs || 1) / 1000))) * 100))}%` }}
+                />
+              </div>
+            </div>
+          )}
 
           <div className="seat-list">
             {seats.map((s) => (
@@ -125,7 +185,14 @@ export default function Game() {
             ))}
             {Array.from({ length: Math.max(0, need) }).map((_, i) => (
               <div key={`empty-${i}`} className="seat seat-empty">
-                <span className="dot dot-empty" /> {isPrivate ? 'Open seat' : 'Searching…'}
+                <span className="dot dot-empty" />{' '}
+                {room?.isPractice
+                  ? botIn > 0
+                    ? `Computer joins in ${botIn}s`
+                    : 'Computer joining…'
+                  : isPrivate
+                    ? 'Open seat'
+                    : 'Searching…'}
               </div>
             ))}
           </div>
@@ -136,7 +203,9 @@ export default function Game() {
               {copied ? 'Copied!' : `Share code: ${room.id}`}
             </button>
           )}
-          <button className="btn btn-ghost btn-block" onClick={leave}>Cancel</button>
+          <button className="btn btn-ghost btn-block" onClick={user?.isGuest ? exitPractice : leave}>
+            Cancel
+          </button>
         </div>
       </div>
     );
@@ -176,12 +245,16 @@ export default function Game() {
     <div className="game">
       <header className="game-top">
         <button className="btn btn-ghost btn-sm" onClick={requestLeave}>← Leave</button>
-        <div className="pot-chip">Pot 🪙 {room?.pot ?? state.players.length * (room?.stake || 0)}</div>
+        {isPractice ? (
+          <div className="practice-chip">Practice</div>
+        ) : (
+          <div className="pot-chip">Pot 🪙 {room?.pot ?? state.players.length * (room?.stake || 0)}</div>
+        )}
         <div className="top-right">
           <button className="mute-btn" onClick={onToggleMute} aria-label={muted ? 'Unmute' : 'Mute'}>
             {muted ? '🔇' : '🔊'}
           </button>
-          <div className="wallet-chip sm">🪙 {user.coins.toLocaleString('en-IN')}</div>
+          {!isPractice && <div className="wallet-chip sm">🪙 {user.coins.toLocaleString('en-IN')}</div>}
         </div>
       </header>
 
@@ -190,8 +263,20 @@ export default function Game() {
           <div key={p.id} className={`player-chip ${p.id === state.currentPlayerId ? 'turn' : ''}`}>
             <span className={`dot c-${p.color}`} />
             <div className="pc-meta">
-              <div className="pc-name">{p.name}{p.id === myId && ' (you)'}</div>
+              <div className="pc-name">
+                {label(p)}
+                {rankOf[p.id] && (
+                  <span className={`pc-rank ${rankOf[p.id].place === 1 ? 'lead' : ''}`}>
+                    {ordinal(rankOf[p.id].place)}
+                  </span>
+                )}
+              </div>
               <div className="pc-sub">🏠 {homeCount(p)}/4</div>
+              {rankOf[p.id] && (
+                <div className="pc-progress" title={`${rankOf[p.id].percent}% of the way home`}>
+                  <div className={`pc-progress-fill c-${p.color}`} style={{ width: `${rankOf[p.id].percent}%` }} />
+                </div>
+              )}
             </div>
             {p.id === state.currentPlayerId && state.lastDie && <span className="pc-die">{state.lastDie}</span>}
             {p.id === state.currentPlayerId && (
@@ -216,13 +301,14 @@ export default function Game() {
           <span className="turn-note">Game over</span>
         ) : !isMyTurn ? (
           <span className="turn-note">
-            <span className={`dot c-${currentPlayer?.color}`} /> {currentPlayer?.name}&rsquo;s turn…
+            <span className={`dot c-${currentPlayer?.color}`} />{' '}
+            {currentPlayer ? (isPractice ? (currentPlayer.id === myId ? 'Your turn' : "Computer's turn…") : `${currentPlayer.name}'s turn…`) : ''}
           </span>
         ) : null}
       </div>
 
       {status === 'finished' && result && (
-        <GameOver result={result} myId={myId} players={state.players} onAgain={onAgain} />
+        <GameOver result={result} myId={myId} players={state.players} onAgain={onAgain} isPractice={isPractice} />
       )}
 
       {confirmLeave && (
@@ -231,7 +317,9 @@ export default function Game() {
             <div className="result-emoji">⚠️</div>
             <h2>Leave the game?</h2>
             <p className="result-sub">
-              You&rsquo;ll forfeit your stake of 🪙 {room?.stake} and your opponent wins the pot.
+              {isPractice
+                ? 'This practice game will end. Nothing is at stake.'
+                : `You’ll forfeit your stake of 🪙 ${room?.stake} and your opponent wins the pot.`}
             </p>
             <div className="confirm-actions">
               <button className="btn btn-ghost" onClick={() => setConfirmLeave(false)}>Keep playing</button>

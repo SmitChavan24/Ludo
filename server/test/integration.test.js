@@ -4,6 +4,7 @@ import { GameManager } from '../src/game/GameManager.js';
 import { store } from '../src/db/store.js';
 import { wallet } from '../src/wallet/Wallet.js';
 import { config } from '../src/config.js';
+import './helpers/wideConfig.js'; // widen stake/table allow-list for tests
 
 // A no-op socket.io double that just records what would have been broadcast.
 function fakeIo() {
@@ -11,7 +12,8 @@ function fakeIo() {
   return {
     events,
     to: () => ({ emit: (event, payload) => events.push({ event, payload }) }),
-    in: () => ({ socketsLeave: () => {} }),
+    in: () => ({ socketsLeave: () => {}, fetchSockets: async () => [] }),
+    socketsLeave: () => {},
   };
 }
 
@@ -111,6 +113,46 @@ test('leaving a 2-player game forfeits the pot to the opponent', async () => {
   assert.equal(await wallet.getBalance(a.id), 1000 - 100, 'forfeiter loses their stake');
   // a is freed to play again; the room is settled.
   assert.equal(manager._roomOf(a.id), null);
+});
+
+test('every room broadcast is tagged with its roomId (so clients can drop stale events)', async () => {
+  const io = fakeIo();
+  const manager = new GameManager(io);
+  const a = await store.createUser({ provider: 'dev', providerId: 'tag-a-itest', name: 'TA' });
+  const b = await store.createUser({ provider: 'dev', providerId: 'tag-b-itest', name: 'TB' });
+  await wallet.credit(a.id, 1000, 'test_seed');
+  await wallet.credit(b.id, 1000, 'test_seed');
+
+  const room = await manager.createRoom(a, { stake: 100, maxPlayers: 2 });
+  await manager.joinRoom(b, room.id);
+  manager.handleRoll(room.engine.currentPlayerId());
+
+  const gameEvents = io.events.filter((e) => e.event.startsWith('game:') || e.event.startsWith('room:'));
+  assert.ok(gameEvents.length > 0, 'expected broadcasts');
+  for (const e of gameEvents) {
+    assert.equal(e.payload.roomId, room.id, `${e.event} must carry its roomId`);
+  }
+});
+
+test('leaving a game frees the player even while the old room lingers', async () => {
+  const manager = new GameManager(fakeIo());
+  const a = await store.createUser({ provider: 'dev', providerId: 'lin-a-itest', name: 'LA' });
+  const b = await store.createUser({ provider: 'dev', providerId: 'lin-b-itest', name: 'LB' });
+  await wallet.credit(a.id, 1000, 'test_seed');
+  await wallet.credit(b.id, 1000, 'test_seed');
+
+  const first = await manager.createRoom(a, { stake: 100, maxPlayers: 2 });
+  await manager.joinRoom(b, first.id);
+  await manager.handleLeave(a.id); // settles; old room lingers ~60s
+
+  // A must be able to start a brand new game immediately...
+  const second = await manager.createRoom(a, { stake: 100, maxPlayers: 2 });
+  assert.notEqual(second.id, first.id);
+  assert.equal(manager._roomOf(a.id)?.id, second.id);
+
+  // ...and the lingering room's cleanup must NOT steal the new mapping.
+  manager._destroyRoom(first);
+  assert.equal(manager._roomOf(a.id)?.id, second.id, 'old room cleanup must not orphan the new game');
 });
 
 test('a player who cannot cover the stake at start is ejected, room stays open', async () => {

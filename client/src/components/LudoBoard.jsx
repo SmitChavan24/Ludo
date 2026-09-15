@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import {
   COLORS,
   START_OFFSET,
@@ -39,6 +40,31 @@ function classify(r, c) {
 const pct = (n) => `${(n / 15) * 100}%`;
 
 export default function LudoBoard({ state, myId, onMove }) {
+  // Tokens whose board position just changed get a brief "travel" lift so moves
+  // read as a piece being picked up and placed, not teleported.
+  const prevPos = useRef(new Map());
+  const [travelers, setTravelers] = useState(() => new Set());
+
+  useEffect(() => {
+    const now = new Map();
+    for (const p of state.players) {
+      p.tokens.forEach((token, i) => {
+        const [r, c] = tokenCell(p.color, token, i);
+        now.set(`${p.id}-${i}`, `${r},${c}`);
+      });
+    }
+    const moved = [];
+    for (const [id, pos] of now) {
+      const prev = prevPos.current.get(id);
+      if (prev !== undefined && prev !== pos) moved.push(id);
+    }
+    prevPos.current = now;
+    if (moved.length === 0) return;
+    setTravelers(new Set(moved));
+    const t = setTimeout(() => setTravelers(new Set()), 480);
+    return () => clearTimeout(t);
+  }, [state.version]);
+
   // Static background: 225 cells.
   const cells = [];
   for (let r = 0; r < 15; r++) {
@@ -111,10 +137,11 @@ export default function LudoBoard({ state, myId, onMove }) {
     const dx = n > 1 ? Math.cos((idx / n) * 2 * Math.PI) * off : 0;
     const dy = n > 1 ? Math.sin((idx / n) * 2 * Math.PI) * off : 0;
     const canMove = t.mine && movable.has(t.tokenIndex);
+    const traveling = travelers.has(t.id);
     return (
       <button
         key={t.id}
-        className={`token c-${t.color} ${canMove ? 'token-movable' : ''} ${t.state === 'home' ? 'token-done' : ''}`}
+        className={`token c-${t.color} ${canMove ? 'token-movable' : ''} ${t.state === 'home' ? 'token-done' : ''} ${traveling ? 'token-travel' : ''}`}
         style={{ top: pct(t.r + 0.5 + dy), left: pct(t.c + 0.5 + dx) }}
         disabled={!canMove}
         onClick={() => canMove && onMove(t.tokenIndex)}

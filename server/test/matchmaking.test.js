@@ -3,8 +3,13 @@ import assert from 'node:assert/strict';
 import { GameManager } from '../src/game/GameManager.js';
 import { store } from '../src/db/store.js';
 import { wallet } from '../src/wallet/Wallet.js';
+import './helpers/wideConfig.js'; // widen stake/table allow-list for tests
 
-const fakeIo = () => ({ to: () => ({ emit: () => {} }) });
+const fakeIo = () => ({
+  to: () => ({ emit: () => {} }),
+  in: () => ({ socketsLeave: () => {}, fetchSockets: async () => [] }),
+  socketsLeave: () => {},
+});
 let n = 0;
 const mkUser = async (tag, coins = 1000) => {
   const u = await store.createUser({ provider: 'dev', providerId: `dev-${tag}-${n++}`, name: tag });
@@ -55,6 +60,32 @@ test('random matchmaking never joins a private friend room', async () => {
   const r = await m.quickMatch(rando, 100, 2);
   assert.notEqual(r.id, priv.id, 'stranger should not be dropped into a private room');
   assert.equal(priv.seats.length, 1, 'private room stays untouched');
+});
+
+test('stakes and table sizes outside the server allow-list are rejected', async () => {
+  const { config } = await import('../src/config.js');
+  const m = new GameManager(fakeIo());
+  const u = await mkUser('allow-list', 100000);
+
+  const stakes = config.economy.stakes;
+  const counts = config.economy.playerCounts;
+  try {
+    // Narrow the lobby the way production does.
+    config.economy.stakes = [50];
+    config.economy.playerCounts = [2];
+
+    // A crafted client asking for an off-menu stake or table size must be refused,
+    // both for economy safety and to stop the matchmaking pool fragmenting.
+    await assert.rejects(() => m.quickMatch(u, 9999, 2), (e) => e.code === 'BAD_STAKE');
+    await assert.rejects(() => m.quickMatch(u, 1, 2), (e) => e.code === 'BAD_STAKE');
+    await assert.rejects(() => m.quickMatch(u, 50, 4), (e) => e.code === 'BAD_MAX_PLAYERS');
+    // The allowed combination still works.
+    const room = await m.quickMatch(u, 50, 2);
+    assert.equal(room.stake, 50);
+  } finally {
+    config.economy.stakes = stakes;
+    config.economy.playerCounts = counts;
+  }
 });
 
 test('invalid player counts are rejected', async () => {

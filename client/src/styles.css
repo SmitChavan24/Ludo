@@ -49,6 +49,7 @@ body {
 /* ── Login ── */
 .login { min-height: 100dvh; display: grid; place-items: center; padding: 24px; }
 .login-card {
+  position: relative; /* anchors .card-busy while signing in */
   width: 100%; max-width: 360px; background: var(--card); border: 1px solid var(--line);
   border-radius: 24px; padding: 32px 24px; text-align: center; box-shadow: 0 30px 60px -30px #000;
 }
@@ -112,6 +113,13 @@ input:focus { border-color: var(--primary); }
 .pc-meta { flex: 1; min-width: 0; }
 .pc-name { font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pc-sub { color: var(--muted); font-size: 11px; }
+/* Live table position, updated by the server after every move, so a player can
+   always see where they stand without waiting for the game to end. */
+.pc-name { display: flex; align-items: center; gap: 6px; }
+.pc-rank { flex: none; font-size: 10px; font-weight: 800; letter-spacing: .02em; color: var(--muted); background: var(--bg-2); border-radius: 999px; padding: 1px 6px; }
+.pc-rank.lead { color: #1b1200; background: var(--accent); }
+.pc-progress { height: 3px; border-radius: 999px; background: var(--bg-2); overflow: hidden; margin-top: 5px; }
+.pc-progress-fill { height: 100%; border-radius: 999px; background: currentColor; transition: width .35s ease; }
 .pc-die { background: #fff; color: #111; width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; font-weight: 800; }
 .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
 .c-red { color: var(--red); } .c-green { color: var(--green); } .c-yellow { color: var(--yellow); } .c-blue { color: var(--blue); }
@@ -155,13 +163,22 @@ input:focus { border-color: var(--primary); }
   background: radial-gradient(circle at 36% 30%, rgba(255, 255, 255, .8), rgba(255, 255, 255, 0) 46%), var(--tk, #888);
   border: 2px solid rgba(255, 255, 255, .92);
   box-shadow: 0 3px 5px rgba(0, 0, 0, .55), inset 0 -3px 4px rgba(0, 0, 0, .32);
-  padding: 0; cursor: default; transition: top .25s ease, left .25s ease;
+  padding: 0; cursor: default;
+  /* Gentle overshoot on landing so moves feel placed, not teleported. */
+  transition: top .45s cubic-bezier(.3, .7, .25, 1.06), left .45s cubic-bezier(.3, .7, .25, 1.06);
 }
 .token.c-red { --tk: var(--red); } .token.c-green { --tk: var(--green); }
 .token.c-yellow { --tk: var(--yellow); } .token.c-blue { --tk: var(--blue); }
 .token-done { opacity: .55; }
 .token-movable { cursor: pointer; animation: bounce .8s infinite; box-shadow: 0 0 0 3px var(--accent), 0 3px 6px rgba(0,0,0,.55), inset 0 -3px 4px rgba(0,0,0,.32); z-index: 4; }
 @keyframes bounce { 0%,100% { transform: translate(-50%, -50%); } 50% { transform: translate(-50%, -64%); } }
+/* While a token glides to its new cell it lifts above the board, then settles. */
+.token-travel { z-index: 5; animation: tokenLift .48s ease-in-out; }
+@keyframes tokenLift {
+  0%   { transform: translate(-50%, -50%) scale(1); box-shadow: 0 3px 5px rgba(0,0,0,.55), inset 0 -3px 4px rgba(0,0,0,.32); }
+  40%  { transform: translate(-50%, -58%) scale(1.28); box-shadow: 0 12px 18px rgba(0,0,0,.5), inset 0 -3px 4px rgba(0,0,0,.32); }
+  100% { transform: translate(-50%, -50%) scale(1); box-shadow: 0 3px 5px rgba(0,0,0,.55), inset 0 -3px 4px rgba(0,0,0,.32); }
+}
 
 /* ── Action bar / dice ── */
 .action-bar { min-height: 116px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 6px 0; }
@@ -188,6 +205,22 @@ input:focus { border-color: var(--primary); }
 .waiting-card { text-align: center; background: var(--card); border: 1px solid var(--line); border-radius: 22px; padding: 28px 22px; width: 100%; max-width: 340px; }
 .waiting-card h2 { margin: 8px 0; }
 .spinner { width: 40px; height: 40px; border: 4px solid var(--line); border-top-color: var(--primary); border-radius: 50%; margin: 0 auto 8px; animation: spin 1s linear infinite; }
+/* Covers a card while a slow request is in flight. Google sign-in verifies the
+   token server-side and mints a session, which is long enough that an
+   unchanged button reads as broken. */
+.card-busy { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; background: var(--card); background: color-mix(in srgb, var(--card) 88%, transparent); backdrop-filter: blur(2px); border-radius: inherit; }
+.card-busy-text { font-weight: 800; font-size: 15px; }
+.card-busy-sub { font-size: 12px; color: var(--muted); }
+/* Small spinner that sits inside a button, next to its label. */
+/* Placeholder rows while a list loads, so the page keeps its shape instead of
+   jumping when the data lands. */
+.t-stat-note { font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+.tourney-prize-max { font-size: 10.5px; color: var(--muted); margin-top: 1px; }
+.pool-note { font-size: 12px; color: var(--muted); background: var(--bg-2); border-radius: 10px; padding: 8px 10px; margin: 8px 0 0; }
+.sk-row { height: 46px; border-radius: 12px; margin-top: 10px; background: linear-gradient(90deg, var(--bg-2) 25%, var(--line) 37%, var(--bg-2) 63%); background-size: 400% 100%; animation: sk 1.4s ease infinite; }
+.sk-row.short { width: 60%; }
+@keyframes sk { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+.btn-spin { display: inline-block; width: 14px; height: 14px; vertical-align: -2px; margin-right: 8px; border: 2px solid rgba(255,255,255,.35); border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .seat-list { display: flex; flex-direction: column; gap: 8px; margin: 16px 0; }
 .seat { display: flex; align-items: center; gap: 8px; background: var(--bg-2); border-radius: 12px; padding: 10px 12px; font-weight: 600; }
@@ -226,7 +259,7 @@ input:focus { border-color: var(--primary); }
 .stats-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .stat-btn { background: var(--card); border: 1px solid var(--line); color: var(--text); border-radius: 14px; padding: 13px; font-weight: 700; font-size: 14px; cursor: pointer; font-family: inherit; }
 .stat-btn:active { transform: translateY(1px); }
-.stats-card { background: var(--card); border: 1px solid var(--line); border-radius: 22px; width: 100%; max-width: 420px; max-height: 80vh; display: flex; flex-direction: column; overflow: hidden; }
+.stats-card { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: 22px; width: 100%; max-width: 420px; max-height: 80vh; display: flex; flex-direction: column; overflow: hidden; }
 .stats-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 12px 0; }
 .tabs { display: flex; gap: 6px; }
 .tab { background: transparent; border: 0; color: var(--muted); font-weight: 700; font-size: 14px; padding: 8px 10px; border-radius: 10px; cursor: pointer; font-family: inherit; }
@@ -256,6 +289,31 @@ input:focus { border-color: var(--primary); }
 .confirm-actions { display: flex; gap: 10px; margin-top: 18px; }
 .confirm-actions .btn { flex: 1; }
 
+/* ── Growth: presence, invites, sharing ── */
+.hero-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.hero-head h2 { margin: 0; }
+.live-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--bg-2); border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: 5px 10px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.live-dot.on { background: var(--green); box-shadow: 0 0 0 3px rgba(34, 197, 94, .18); animation: livePulse 2s ease-in-out infinite; }
+@keyframes livePulse { 50% { opacity: .45; } }
+.invite-card { border-color: #1f7a4d; box-shadow: inset 0 0 0 1px rgba(37, 211, 102, .35); }
+.btn-whatsapp { background: linear-gradient(180deg, #2bd96f, #1eb655); color: #04220f; }
+.code-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; background: var(--bg-2); border: 1px dashed var(--line); border-radius: 12px; padding: 10px 12px; margin-top: 10px; color: var(--muted); font-size: 12px; cursor: pointer; font-family: inherit; }
+.code-row b { color: var(--accent); letter-spacing: 1px; font-size: 14px; }
+.invite-stat { color: var(--green); font-size: 12px; font-weight: 700; margin: 10px 0 0; text-align: center; }
+
+/* ── Fairness / how-it-works ── */
+.foot-link { background: none; border: 0; color: var(--muted); font-size: 12px; cursor: pointer; font-family: inherit; padding: 8px; }
+.foot-more { color: var(--primary-2); font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
+.info-card { max-width: 440px; }
+.info-title { font-size: 17px; margin: 4px 4px 8px; }
+.info-body section { margin-bottom: 18px; }
+.info-body h3 { font-size: 14px; color: var(--text); margin: 0 0 6px; }
+.info-body p { color: var(--muted); font-size: 13px; line-height: 1.55; margin: 0 0 8px; }
+.info-body b, .info-body em { color: var(--text); font-style: normal; }
+.info-tech { background: var(--bg-2); border-radius: 12px; padding: 12px; }
+.info-tech code { color: var(--accent); font-size: 11px; word-break: break-all; }
+
 .hist-row { display: flex; align-items: center; gap: 12px; background: var(--bg-2); border-radius: 12px; padding: 10px 12px; }
 .hist-badge { font-size: 10px; font-weight: 800; padding: 4px 8px; border-radius: 6px; letter-spacing: .5px; }
 .hist-badge.win { background: rgba(34, 197, 94, .18); color: var(--green); }
@@ -263,3 +321,144 @@ input:focus { border-color: var(--primary); }
 .hist-meta { flex: 1; min-width: 0; }
 .hist-vs { font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hist-sub { color: var(--muted); font-size: 11px; }
+
+/* ── Practice mode ── */
+.practice-chip { background: var(--card-2); border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: 8px 14px; font-weight: 800; font-size: 13px; }
+.practice-note { color: var(--muted); font-size: 12px; margin: 10px 0 0; }
+.signin-cta { background: var(--bg-2); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin: 4px 0 16px; }
+.signin-cta p { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 0 0 12px; }
+.signin-cta b { color: var(--accent); }
+.conn-warn { color: #ff8a8a; font-size: 12px; margin: 10px 0 0; }
+
+/* ── Practice: bot-join countdown ── */
+.bot-countdown { margin: 4px 0 14px; }
+.bot-count-num { font-size: 40px; font-weight: 900; color: var(--accent); line-height: 1.1; font-variant-numeric: tabular-nums; }
+.bot-count-label { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+.bot-count-bar { height: 4px; background: rgba(255, 255, 255, .08); border-radius: 999px; overflow: hidden; }
+.bot-count-fill { height: 100%; background: var(--accent); border-radius: 999px; transition: width .25s linear; }
+
+/* ── Push notification toggle ── */
+.push-toggle { margin-top: 4px; }
+.push-note { color: var(--muted); font-size: 11px; margin: 8px 0 0; text-align: center; line-height: 1.45; }
+
+/* ── Mandatory notifications warning ── */
+.push-required { background: #2a2010; border: 1px solid #7a5c1f; border-radius: 16px; padding: 16px; margin-bottom: 16px; text-align: left; }
+.push-required-head { font-weight: 800; color: var(--accent); margin-bottom: 8px; font-size: 15px; }
+.push-required p { color: #e6d9b8; font-size: 12.5px; line-height: 1.5; margin: 0 0 12px; }
+.push-required-note { color: #ffb4a2 !important; font-size: 11.5px !important; margin: 10px 0 0 !important; }
+
+/* ── Install prompt ── */
+.install-card { background: var(--bg-2); border: 1px solid var(--line); border-radius: 16px; padding: 14px; margin-top: 16px; text-align: left; }
+.install-head { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 12px; }
+.install-icon { font-size: 22px; }
+.install-title { font-weight: 800; font-size: 14px; }
+.install-sub { color: var(--muted); font-size: 12px; line-height: 1.45; }
+.install-ios { color: var(--muted); font-size: 12px; line-height: 1.6; margin: 0 0 8px; }
+.install-ios b { color: var(--text); }
+.install-ios em { color: var(--accent); font-style: normal; }
+
+/* ── Unblock-notifications guidance ── */
+.unblock { background: var(--bg-2); border: 1px solid #7a3b3b; border-radius: 14px; padding: 14px; margin-top: 12px; text-align: left; }
+.unblock-head { font-weight: 800; font-size: 13.5px; color: #ffb4a2; margin-bottom: 8px; }
+.unblock-intro { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 0 0 10px; }
+.unblock-steps { margin: 0 0 14px; padding-left: 20px; color: var(--text); font-size: 12.5px; line-height: 1.75; }
+.unblock-steps li { margin-bottom: 2px; }
+.eligibility { color: var(--muted); font-size: 10.5px; margin: 10px 0 0; opacity: .85; line-height: 1.5; }
+
+/* ── Wallet: two balances ── */
+.wallet-open { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-family: inherit; }
+.chip-cash { color: var(--green); font-weight: 800; }
+.chip-sep { width: 1px; height: 14px; background: var(--line); display: inline-block; }
+.chip-coins { color: var(--accent); font-weight: 800; font-size: 12px; }
+.wallet-card { max-width: 420px; }
+.balances { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+.bal { border-radius: 14px; padding: 12px; border: 1px solid var(--line); background: var(--bg-2); }
+.bal-cash { border-color: #1f7a4d; }
+.bal-label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
+.bal-value { font-size: 22px; font-weight: 900; margin: 4px 0 2px; }
+.bal-cash .bal-value { color: var(--green); }
+.bal-coins .bal-value { color: var(--accent); }
+.bal-note { color: var(--muted); font-size: 10.5px; line-height: 1.4; }
+.pay-panel { margin-top: 12px; }
+.pay-panel input { margin-bottom: 6px; }
+.pay-status { color: var(--accent); font-weight: 700; font-size: 14px; margin: 0 0 6px; }
+.pay-to { background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 10px 0; }
+.pay-to-row { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.pay-to-row b { color: var(--text); word-break: break-all; }
+.pay-qr { display: block; width: 160px; max-width: 100%; margin: 0 auto 10px; border-radius: 10px; background: #fff; padding: 6px; }
+
+/* ── UPI QR scanner ── */
+.qr-scanner { background: var(--bg-2); border: 1px solid var(--line); border-radius: 14px; padding: 12px; margin: 10px 0; }
+.qr-head { display: flex; align-items: center; justify-content: space-between; font-weight: 700; font-size: 13px; margin-bottom: 10px; }
+.qr-video-wrap { position: relative; }
+.qr-video { width: 100%; border-radius: 12px; background: #000; aspect-ratio: 1; object-fit: cover; }
+.qr-frame { position: absolute; inset: 18% 18% auto 18%; aspect-ratio: 1; border: 2px solid var(--accent); border-radius: 12px; pointer-events: none; }
+.qr-hint { color: var(--muted); font-size: 12px; text-align: center; margin: 8px 0; }
+.qr-upload { display: block; text-align: center; cursor: pointer; margin-top: 8px; }
+.qr-note { color: var(--muted); font-size: 11px; line-height: 1.5; margin: 8px 0 0; }
+.qr-note b { color: var(--text); }
+.alerts-card { border-color: #7a5c1f; }
+
+/* ── Tournaments ── */
+.tourney-card { border-color: #7a5c1f; box-shadow: inset 0 0 0 1px rgba(255, 210, 63, .25); }
+.tourney-list { display: flex; flex-direction: column; gap: 8px; }
+.tourney-row { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: var(--bg-2); border: 1px solid var(--line); border-radius: 14px; padding: 12px; cursor: pointer; font-family: inherit; color: var(--text); }
+.tourney-row:active { transform: translateY(1px); }
+.tourney-main { flex: 1; min-width: 0; }
+.tourney-title { font-weight: 800; font-size: 14px; }
+.tourney-sub { color: var(--muted); font-size: 11.5px; margin-top: 3px; }
+.tourney-live { color: var(--green); font-weight: 700; }
+.tourney-prize { text-align: right; }
+.tourney-prize-value { color: var(--accent); font-weight: 900; font-size: 17px; }
+.tourney-prize-label { color: var(--muted); font-size: 10px; }
+.t-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+.t-stat { background: var(--bg-2); border-radius: 12px; padding: 10px; text-align: center; }
+.t-stat-value { font-weight: 900; font-size: 16px; color: var(--accent); }
+.t-stat-label { color: var(--muted); font-size: 10px; margin-top: 2px; }
+.t-joined { background: rgba(34, 197, 94, .12); border: 1px solid #1f7a4d; border-radius: 12px; padding: 12px; font-size: 13px; font-weight: 600; margin: 12px 0; }
+.t-closed { color: var(--muted); font-size: 13px; text-align: center; padding: 12px; background: var(--bg-2); border-radius: 12px; margin: 12px 0; }
+.t-pay { margin: 12px 0; }
+.t-h3 { font-size: 13px; color: var(--muted); margin: 18px 0 8px; }
+.t-players { display: flex; flex-direction: column; gap: 6px; }
+.t-player, .t-match { background: var(--bg-2); border-radius: 10px; padding: 8px 10px; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+.t-player.me, .t-match.me { outline: 1.5px solid var(--accent); }
+.t-seed { color: var(--muted); font-size: 11px; min-width: 16px; }
+/* Where you stand in the bracket and what is still between you and the title.
+   Shown at every stage, so progress is never something you have to infer. */
+.t-milestone { background: var(--bg-2); border: 1.5px solid var(--line); border-radius: 14px; padding: 12px 14px; margin: 14px 0; }
+.t-milestone.won { border-color: var(--accent); background: rgba(255, 210, 63, .10); }
+.t-milestone.out { opacity: .75; }
+.tm-label { font-weight: 800; font-size: 14px; margin-bottom: 10px; }
+.tm-steps { display: flex; gap: 6px; margin-bottom: 10px; }
+.tm-pip { flex: 1; height: 6px; border-radius: 999px; background: var(--line); }
+.tm-pip.done { background: var(--green); }
+.tm-pip.now { background: var(--accent); box-shadow: 0 0 0 2px rgba(255, 210, 63, .2); }
+.tm-meta { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; color: var(--muted); }
+.tm-next { margin-top: 8px; font-size: 12.5px; font-weight: 700; }
+/* Why the run ended, and the board it ended on. A knockout that only says
+   "you lost" reads as arbitrary; naming the cause is what makes it trustworthy. */
+.tm-exit { margin-top: 10px; padding: 9px 11px; border-radius: 10px; background: var(--card); border-left: 3px solid var(--red); }
+.tm-exit-why { font-size: 12.5px; font-weight: 700; }
+.tm-exit-score { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+/* Round-by-round record of the run. */
+.tm-journey { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; }
+.tmj { display: flex; align-items: center; gap: 10px; background: var(--card); border-radius: 10px; padding: 7px 10px; }
+.tmj-round { flex: none; font-size: 10.5px; font-weight: 800; color: var(--muted); width: 22px; }
+.tmj-body { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.tmj-vs { font-size: 12.5px; font-weight: 700; }
+.tmj-reason { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tmj-mark { flex: none; font-size: 10px; font-weight: 800; letter-spacing: .04em; color: var(--muted); }
+.tmj.won .tmj-mark { color: var(--green); }
+.tmj.lost .tmj-mark { color: var(--red); }
+.tmj.lost { opacity: .85; }
+.t-winner { text-align: center; font-weight: 800; color: var(--accent); margin-top: 14px; }
+.balances-3 { grid-template-columns: repeat(3, 1fr); }
+.balances-3 .bal-value { font-size: 17px; }
+.bal-win { border-color: #7a5c1f; }
+.bal-win .bal-value { color: var(--accent); }
+.win-hint { background: var(--bg-2); border: 1px dashed var(--line); border-radius: 12px; padding: 10px 12px; color: var(--muted); font-size: 12px; text-align: center; margin: 0 0 12px; }
+.fee-note { background: var(--bg-2); border-left: 3px solid var(--green); border-radius: 8px; padding: 9px 11px; color: var(--muted); font-size: 11.5px; line-height: 1.5; margin: 0 0 12px; }
+.how-step { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 14px; }
+.how-num { flex: 0 0 22px; height: 22px; border-radius: 50%; background: var(--primary); color: #fff; font-weight: 800; font-size: 12px; display: grid; place-items: center; }
+.how-step b { font-size: 13px; }
+.how-step p { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 3px 0 0; }

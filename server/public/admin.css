@@ -60,3 +60,39 @@ input:focus { border-color: var(--primary); }
 .error { color: #ff8a8a; font-size: 13px; margin-top: 10px; }
 .msg { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #16321f; border: 1px solid var(--green); color: #c9f5d6; padding: 12px 18px; border-radius: 12px; font-weight: 600; max-width: 90%; }
 .msg.error { background: #3a1320; border-color: var(--red); color: #ffd7d7; }
+select { display: block; width: 100%; margin-top: 6px; background: var(--bg-2); border: 1.5px solid var(--line); border-radius: 12px; padding: 12px; color: var(--text); font-size: 15px; font-family: inherit; }
+
+/* ── Tabs ── */
+.tabs { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 16px; padding-bottom: 4px; }
+.tab { background: var(--card); border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: 8px 14px; font-weight: 700; font-size: 13px; cursor: pointer; white-space: nowrap; font-family: inherit; }
+.tab.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+.badge { background: var(--red); color: #fff; border-radius: 999px; padding: 1px 7px; font-size: 11px; margin-left: 6px; }
+
+/* ── KPIs ── */
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 16px; }
+.kpi { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+.kpi.good { border-color: #1f7a4d; }
+.kpi.warn { border-color: #7a5c1f; }
+.kpi-label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
+.kpi-value { font-size: 22px; font-weight: 900; margin-top: 4px; }
+.kpi.good .kpi-value { color: var(--green); }
+.kpi.warn .kpi-value { color: var(--accent); }
+
+/* ── Rows ── */
+.rows { display: flex; flex-direction: column; gap: 8px; }
+.row-item { display: flex; align-items: center; gap: 10px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; flex-wrap: wrap; }
+.row-main { flex: 1; min-width: 180px; }
+.row-title { font-weight: 700; font-size: 14px; }
+.row-sub { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+.row-amount { font-weight: 800; color: var(--green); }
+.row-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.btn.small { padding: 7px 11px; font-size: 12px; border-radius: 9px; }
+.btn.block { display: block; width: 100%; margin-top: 12px; }
+/* Row-level destructive action: readable as dangerous, but quiet enough to sit
+   next to "Open" on every row without drawing the click. */
+.btn.small.danger { background: transparent; color: var(--red); border: 1.5px solid var(--red); }
+.btn.small.danger:hover { background: var(--red); color: #fff; }
+.tiny-input { width: 90px; margin: 0; padding: 7px 9px; font-size: 13px; }
+.preview { background: var(--bg-2); border: 1px dashed var(--line); border-radius: 10px; padding: 10px; color: var(--accent); font-size: 12.5px; margin: 4px 0 12px; }
+.detail-money { background: var(--bg-2); border-radius: 12px; padding: 12px; font-size: 13px; line-height: 1.7; margin-bottom: 8px; }
+.panel h3 { margin: 18px 0 8px; }

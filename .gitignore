@@ -7,11 +7,15 @@ node_modules/
 dist/
 build/
 client/dist/
+# vite-plugin-pwa writes this in dev mode; regenerated on every run
+client/dev-dist/
 
 # Environment & secrets — NEVER commit these
+# Any .env variant (backups, per-environment copies) holds real secrets; only the
+# templates are safe to share.
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 *.pem
 *.key
 secrets/

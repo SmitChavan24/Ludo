@@ -8,5 +8,5 @@ export const API_BASE = `${SERVER_URL}/api`;
 // Optional Google OAuth client id (same value as the server's GOOGLE_CLIENT_ID).
 export const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 
-// Stake presets shown in the lobby.
-export const STAKES = [50, 100, 250, 500];
+// Stakes and table sizes are served by the API (`/api/config`) and held in
+// `store/appConfig.js`, so the lobby can be widened without a rebuild.

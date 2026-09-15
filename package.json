@@ -13,7 +13,9 @@
     "dev:server": "npm --workspace server run dev",
     "dev:client": "npm --workspace client run dev",
     "test": "npm --workspace server test",
-    "start": "npm --workspace server run start"
+    "start": "npm --workspace server run start",
+    "build": "npm --workspace client run build",
+    "start:prod": "npm run build && cd server && NODE_ENV=production node src/index.js"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

@@ -1,10 +1,14 @@
 import { useState } from 'react';
+import { useAuth } from '../store/auth.js';
+import { shareWin } from '../util/share.js';
 
 // End-of-game overlay. For a money game, the "Verify fairness" panel is the
 // trust feature: it shows the revealed seeds so a player can recompute every
 // roll and confirm nothing was rigged.
-export default function GameOver({ result, myId, players, onAgain }) {
+export default function GameOver({ result, myId, players, onAgain, isPractice = false }) {
   const [showFair, setShowFair] = useState(false);
+  const [shared, setShared] = useState(null);
+  const referralCode = useAuth((s) => s.user?.referralCode);
 
   if (result.aborted) {
     return (
@@ -23,16 +27,33 @@ export default function GameOver({ result, myId, players, onAgain }) {
   return (
     <Overlay>
       <div className="result-emoji">{iWon ? '🏆' : '🎯'}</div>
-      <h2>{iWon ? 'You won!' : `${winner?.name || 'Opponent'} won`}</h2>
-      {iWon ? (
+      <h2>{iWon ? 'You won!' : isPractice ? 'Computer won' : `${winner?.name || 'Opponent'} won`}</h2>
+      {isPractice ? (
+        <p className="result-sub">
+          {iWon ? 'Nice — that was a practice game.' : 'Good try! That was a practice game.'}
+        </p>
+      ) : iWon ? (
         <p className="result-win">+ 🪙 {result.payout?.toLocaleString('en-IN')}</p>
       ) : (
         <p className="result-sub">Better luck next round.</p>
       )}
-      <div className="result-meta">
-        <span>Pot 🪙 {result.pot}</span>
-        <span>Fee 🪙 {result.rake}</span>
-      </div>
+      {!isPractice && (
+        <div className="result-meta">
+          <span>Pot 🪙 {result.pot}</span>
+          <span>Fee 🪙 {result.rake}</span>
+        </div>
+      )}
+
+      {/* Practice is the top of the funnel — this is the moment to convert. */}
+      {isPractice && (
+        <div className="signin-cta">
+          <p>Ready to play for real? Sign in to join <b>cash tournaments</b> and win real prizes with your skills.</p>
+          <button className="btn btn-primary btn-block" onClick={() => useAuth.getState().logout()}>
+            Sign in with Google
+          </button>
+          <p className="eligibility">18+ only. Entry fees apply.</p>
+        </div>
+      )}
 
       {result.fairness && (
         <div className="fairness">
@@ -51,7 +72,30 @@ export default function GameOver({ result, myId, players, onAgain }) {
         </div>
       )}
 
-      <button className="btn btn-primary btn-block" onClick={onAgain}>Play again</button>
+      {/* Winning is the moment people actually want to share — and the share
+          carries their referral link, so a brag doubles as an invite. */}
+      {iWon && !isPractice && (
+        <button
+          className="btn btn-whatsapp btn-block"
+          onClick={async () => {
+            const res = await shareWin({
+              payout: result.payout,
+              opponents: players?.filter((p) => p.id !== myId).map((p) => p.name),
+              referralCode,
+            });
+            if (res === 'copied') setShared('Link copied — paste it anywhere!');
+            else if (res === 'failed') setShared('Could not open share');
+            if (res) setTimeout(() => setShared(null), 2500);
+          }}
+        >
+          📣 Share your win
+        </button>
+      )}
+      {shared && <p className="result-sub">{shared}</p>}
+
+      <button className={`btn btn-block ${isPractice ? 'btn-outline' : 'btn-primary'}`} onClick={onAgain}>
+        {isPractice ? 'Play another practice game' : 'Play again'}
+      </button>
     </Overlay>
   );
 }

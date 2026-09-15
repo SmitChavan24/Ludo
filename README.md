@@ -160,6 +160,61 @@ The money path is already abstracted behind `Wallet`. To go live later:
 
 ---
 
+## Practice mode (free play, no account)
+
+The first screen offers **▶ Practice Match** — no sign-in, no name to type, no
+coins. It's the answer to the cold-start problem: a brand-new visitor can always
+play something immediately.
+
+How a practice game finds an opponent:
+
+1. Look for another practice player already waiting → pair them (real humans are
+   always preferred).
+2. If nobody arrives within `PRACTICE_BOT_WAIT_MS` (default **20s**), a **bot**
+   sits down and the game starts.
+
+Practice games are completely walled off from the economy: stake 0, **no escrow,
+no payout, no rake, no ledger entries, no stats, no leaderboard, no game history**
+(there's a test asserting exactly this). Players are shown anonymously as
+*You* / *Computer* — no names anywhere.
+
+Guests get a short-lived token carrying a `guest` scope. That scope is what
+blocks them from anything involving coins — staked games are refused server-side
+with `GUEST_FORBIDDEN`, and the wallet/referral/history endpoints reject them via
+`requireAccount`. Signing in with Google is what unlocks coins, stats and invites,
+and the end-of-game screen nudges toward it.
+
+The bot ([`game/bot.js`](server/src/game/bot.js)) plays through the **same
+authoritative engine** as a human — it only picks among the legal moves the
+engine already generated, so it cannot cheat. It's a heuristic (prefers captures,
+finishing, getting tokens out, safe squares, escaping threats) with a
+deliberately human-ish pause, tuned to be good but beatable.
+
+## Growth: matchmaking liquidity, referrals, sharing
+
+**The most important launch setting is `STAKES` / `PLAYER_COUNTS`.** Every extra
+combination creates another matchmaking queue — 4 stakes × 3 table sizes is *12
+separate pools*. With a handful of players online, a split pool means nobody ever
+gets matched, and they leave thinking the game is dead. Ship with **one stake and
+one table size** (the defaults: `STAKES=50`, `PLAYER_COUNTS=2`) and widen only as
+concurrent players grow. The lobby hides the pickers entirely when there's one
+option, and the server **rejects** any off-menu stake, so it can't be bypassed.
+
+`GET /api/config` serves these to the client, so you can widen or throttle the
+lobby by changing `.env` and restarting — no client rebuild.
+
+**Referrals** (`REFERRAL_BONUS_COINS`, default 500 to *each* side): every account
+gets a short code (ambiguous characters like `0/O/1/I/L` excluded so it survives
+being retyped from a chat). Invite links look like `https://yourdomain/?ref=ABC123`;
+the code is remembered until the visitor actually signs up, and pays out **only on
+a genuinely new account**, so it can't be farmed by logging in again.
+
+**Sharing** is WhatsApp-first (the share sheet on mobile, a `wa.me` link on
+desktop, clipboard as last resort). The game-over screen has a "Share your win"
+button that carries the winner's referral link — a brag doubles as an invite.
+For link previews to render, set **`VITE_PUBLIC_URL`** to your real domain before
+building; the OG tags and `public/og-image.png` do the rest.
+
 ## Admin / CRM coin top-ups
 
 Players join random matches (2/3/4 players) via **Quick Match** — no code needed.

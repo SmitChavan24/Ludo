@@ -16,6 +16,21 @@ export function verifyAccessToken(token) {
   return jwt.verify(token, config.jwt.accessSecret);
 }
 
+// Resolve a verified token into the actor it represents. Guests are synthesized
+// on the fly (they have no DB row); real players are loaded from the store by
+// the caller. Returns null for a guest-shaped payload when guests are disabled.
+export function guestFromPayload(payload) {
+  if (payload?.scope !== 'guest') return null;
+  return {
+    id: payload.sub,
+    name: 'Player',
+    picture: null,
+    isGuest: true,
+    gamesPlayed: 0,
+    gamesWon: 0,
+  };
+}
+
 // Long-lived refresh token, tracked by jti so it can be revoked (logout) and
 // rotated (one-time use) — a stolen refresh token is far less dangerous this way.
 export async function issueRefreshToken(user) {
@@ -45,6 +60,17 @@ export async function rotateRefreshToken(oldPayload, user) {
 
 export async function revokeRefreshToken(payload) {
   if (payload?.jti) await store.revokeRefreshSession(payload.jti);
+}
+
+// ── Guest (practice-only) tokens ──
+// A guest has NO database record, NO wallet and NO stats. The token carries
+// `scope: 'guest'` so the game layer can allow practice play while refusing
+// anything that touches coins. Deliberately short-lived.
+export function signGuestToken(guestId, ttlSeconds) {
+  return jwt.sign({ scope: 'guest' }, config.jwt.accessSecret, {
+    subject: guestId,
+    expiresIn: ttlSeconds,
+  });
 }
 
 // ── Admin web-page session tokens ──

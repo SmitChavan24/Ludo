@@ -44,6 +44,7 @@ export class LudoEngine {
       finished: false,
       finishedAt: null,
       eliminated: false, // left/forfeited mid-game — skipped in turn order
+      captures: 0, // opponents' tokens sent home — the last skill-based tiebreak
       tokens: Array.from({ length: TOKENS_PER_PLAYER }, () => ({
         state: 'yard', // 'yard' | 'active' | 'home'
         steps: -1,
@@ -261,6 +262,7 @@ export class LudoEngine {
       const victimToken = this.getPlayer(cap.playerId).tokens[cap.tokenIndex];
       victimToken.state = 'yard';
       victimToken.steps = -1;
+      player.captures += 1;
       captured.push(cap);
     }
 
@@ -283,9 +285,10 @@ export class LudoEngine {
     this.version += 1;
 
     if (gameOver) {
-      // Anyone still unfinished is appended to the standings by remaining order.
-      for (const p of this.players) {
-        if (!this.winners.includes(p.id)) this.winners.push(p.id);
+      // Anyone still unfinished takes the places below, ordered by how far they
+      // actually got — placement pays out in tournaments, so it must be earned.
+      for (const id of this._rankIds(this.players.map((p) => p.id).filter((id) => !this.winners.includes(id)))) {
+        this.winners.push(id);
       }
       this.phase = 'finished';
       this.legalMoves = [];
@@ -350,8 +353,8 @@ export class LudoEngine {
       if (active.length === 1 && !this.winners.includes(active[0].id)) {
         this.winners.unshift(active[0].id);
       }
-      for (const p of this.players) {
-        if (!this.winners.includes(p.id)) this.winners.push(p.id);
+      for (const id of this._rankIds(this.players.map((p) => p.id).filter((id) => !this.winners.includes(id)))) {
+        this.winners.push(id);
       }
       this.phase = 'finished';
       this.legalMoves = [];
@@ -363,6 +366,87 @@ export class LudoEngine {
     // Still going: if it was their turn, move on to the next player.
     if (this.currentPlayerId() === playerId) this._advanceTurn();
     return { gameOver: false, winnerId: null };
+  }
+
+  // ── progress, ranking & decided endings ───────────────────────────────────
+
+  // How far a player has actually got. This is the basis for the live table
+  // position, for the final placings, and for deciding a game that runs out of
+  // time — so a result is never arbitrary and never left undecided.
+  progressOf(playerId) {
+    const p = this.getPlayer(playerId);
+    if (!p) return null;
+    let home = 0;
+    let active = 0;
+    let steps = 0;
+    for (const t of p.tokens) {
+      if (t.state === 'home') home += 1;
+      else if (t.state === 'active') active += 1;
+      if (t.steps > 0) steps += t.steps;
+    }
+    return {
+      home,
+      active,
+      steps,
+      captures: p.captures,
+      // 0..100, for a progress bar: every token walking the full path is 100%.
+      percent: Math.round((steps / (TOKENS_PER_PLAYER * HOME_STEP)) * 100),
+    };
+  }
+
+  // Deterministic ordering, best first. Every input is public and reproducible
+  // from the move log, so players can check a decided game for themselves.
+  // Tokens home first, then distance travelled, then tokens out of the yard,
+  // then captures, and finally seat order so the result is never a coin toss.
+  _rankIds(ids) {
+    return [...ids].sort((a, b) => {
+      const pa = this.getPlayer(a);
+      const pb = this.getPlayer(b);
+      // Anyone who walked away ranks below everyone still at the table.
+      if (pa.eliminated !== pb.eliminated) return pa.eliminated ? 1 : -1;
+      const A = this.progressOf(a);
+      const B = this.progressOf(b);
+      return (
+        B.home - A.home ||
+        B.steps - A.steps ||
+        B.active - A.active ||
+        B.captures - A.captures ||
+        pa.seatIndex - pb.seatIndex
+      );
+    });
+  }
+
+  // Live table position. Players who already finished keep the place they
+  // earned; everyone else is ranked on progress, updated after every move.
+  standings() {
+    const done = this.winners.filter((id) => this.getPlayer(id)?.finished);
+    const rest = this._rankIds(this.players.map((p) => p.id).filter((id) => !done.includes(id)));
+    return [...done, ...rest].map((id, i) => {
+      const p = this.getPlayer(id);
+      return {
+        playerId: id,
+        place: i + 1,
+        finished: p.finished,
+        eliminated: p.eliminated,
+        ...this.progressOf(id),
+      };
+    });
+  }
+
+  // End a game that cannot continue (the whole table went idle) with a real
+  // result rather than no result at all. A knockout bracket cannot advance on a
+  // void match, and a player who was clearly ahead should not lose that lead
+  // just because their opponent stopped playing.
+  finishByProgress(reason = 'timeout') {
+    if (this.phase === 'finished') return null;
+    const order = this.standings().map((s) => s.playerId);
+    this.winners = order;
+    this.phase = 'finished';
+    this.legalMoves = [];
+    this.lastDie = null;
+    this.version += 1;
+    this._log({ type: 'gameOver', winners: this.winners, reason });
+    return { gameOver: true, winnerId: order[0], reason };
   }
 
   // ── serialization ─────────────────────────────────────────────────────────
@@ -380,6 +464,7 @@ export class LudoEngine {
       legalMoves: this.legalMoves,
       consecutiveSixes: this.consecutiveSixes,
       winners: this.winners,
+      standings: this.standings(),
       rules: this.rules,
       players: this.players.map((p) => ({
         id: p.id,
@@ -389,6 +474,7 @@ export class LudoEngine {
         finished: p.finished,
         finishedAt: p.finishedAt,
         eliminated: p.eliminated,
+        captures: p.captures,
         tokens: p.tokens.map((t) => ({
           state: t.state,
           steps: t.steps,

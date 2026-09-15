@@ -8,6 +8,11 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
+      // injectManifest (not generateSW) so our own service worker can handle
+      // push and notification clicks alongside Workbox precaching.
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.js',
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'icon-192.png', 'icon-512.png'],
       manifest: {
@@ -25,7 +30,10 @@ export default defineConfig({
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
-      devOptions: { enabled: false },
+      // Register the service worker in dev as well — without it
+      // `navigator.serviceWorker.ready` never resolves and anything awaiting it
+      // (push subscription) hangs forever.
+      devOptions: { enabled: true, type: 'module' },
     }),
   ],
   server: {

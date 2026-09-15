@@ -2,6 +2,7 @@ import { nanoid } from 'nanoid';
 import { LudoEngine, GameError } from './LudoEngine.js';
 import { ProvablyFairDice } from './dice.js';
 import { COLORS } from './constants.js';
+import { chooseMove, isBotId, makeBotId } from './bot.js';
 import { wallet } from '../wallet/Wallet.js';
 import { store } from '../db/store.js';
 import { config } from '../config.js';
@@ -32,12 +33,21 @@ export class GameManager {
     return id ? this.rooms.get(id) : null;
   }
 
+  // Every room broadcast is tagged with its roomId so a client can ignore
+  // late events from a game it has already left.
   _emitRoom(room, event, payload) {
-    this.io.to(`room:${room.id}`).emit(event, payload);
+    this.io.to(`room:${room.id}`).emit(event, { ...payload, roomId: room.id });
   }
 
   _emitUser(userId, event, payload) {
     this.io.to(`user:${userId}`).emit(event, payload);
+  }
+
+  // Take a user's sockets out of a room's broadcast channel. Essential: without
+  // this, a finished/abandoned room keeps broadcasting to a player who has since
+  // joined a NEW game, and those stale events overwrite their live game state.
+  _leaveChannel(room, userId) {
+    this.io.in(`user:${userId}`).socketsLeave(`room:${room.id}`);
   }
 
   serializeRoom(room) {
@@ -47,6 +57,10 @@ export class GameManager {
       stake: room.stake,
       maxPlayers: room.maxPlayers,
       isPrivate: room.isPrivate,
+      isPractice: !!room.isPractice,
+      // Practice only: how long until a bot fills the table, so the waiting
+      // screen can count down. Relative, to be immune to clock skew.
+      botJoinsInMs: room.botJoinsAt ? Math.max(0, room.botJoinsAt - Date.now()) : null,
       hostId: room.hostId,
       rules: room.rules,
       pot: room.pot,
@@ -59,6 +73,7 @@ export class GameManager {
         picture: s.picture,
         color: s.color,
         connected: s.connected,
+        isBot: !!s.isBot,
       })),
     };
   }
@@ -75,23 +90,46 @@ export class GameManager {
     };
   }
 
-  _validateStake(stake) {
+  // Practice games are free (stake 0) and never touch the wallet, so the stake
+  // allow-list doesn't apply to them.
+  _validateStake(stake, { practice = false } = {}) {
+    if (practice) {
+      if (stake !== 0) throw new GameError('Practice games are free', 'BAD_STAKE');
+      return;
+    }
+    return this._validateStakeStrict(stake);
+  }
+
+  // Stakes and table sizes must come from the server's allow-list — never just
+  // "any positive integer" from the client. This both protects the economy and
+  // keeps the matchmaking pool from fragmenting.
+  _validateStakeStrict(stake) {
     if (!Number.isInteger(stake) || stake <= 0) {
       throw new GameError('Stake must be a positive whole number of coins', 'BAD_STAKE');
+    }
+    if (!config.economy.stakes.includes(stake)) {
+      throw new GameError('That stake is not available', 'BAD_STAKE');
+    }
+  }
+
+  _validatePlayerCount(maxPlayers) {
+    if (!config.economy.playerCounts.includes(maxPlayers)) {
+      throw new GameError('That table size is not available', 'BAD_MAX_PLAYERS');
     }
   }
 
   // ── lobby / matchmaking ─────────────────────────────────────────────────
 
-  async createRoom(user, { stake, maxPlayers = 2, rules = {}, isPrivate = false, clientSeed } = {}) {
-    this._validateStake(stake);
-    if (![2, 3, 4].includes(maxPlayers)) {
-      throw new GameError('A game must have 2, 3, or 4 players', 'BAD_MAX_PLAYERS');
+  async createRoom(user, { stake, maxPlayers = 2, rules = {}, isPrivate = false, clientSeed, isPractice = false } = {}) {
+    if (!isPractice && user.isGuest) {
+      throw new GameError('Sign in to play with coins', 'GUEST_FORBIDDEN');
     }
+    this._validateStake(stake, { practice: isPractice });
+    this._validatePlayerCount(maxPlayers);
     if (this._roomOf(user.id)) {
       throw new GameError('You are already in a game', 'ALREADY_IN_GAME');
     }
-    if ((await wallet.getBalance(user.id)) < stake) {
+    if (!isPractice && (await wallet.getBalance(user.id)) < stake) {
       throw new GameError('Not enough coins for this stake', 'INSUFFICIENT_FUNDS');
     }
 
@@ -103,6 +141,8 @@ export class GameManager {
       // Private rooms are friend games joined by code; they are never returned
       // by random matchmaking.
       isPrivate,
+      // Practice: free, anonymous, bot-backed, and completely off the ledger.
+      isPractice,
       rules,
       hostId: user.id,
       seats: [],
@@ -112,11 +152,16 @@ export class GameManager {
       engine: null,
       turnTimer: null,
       disconnectTimers: new Map(), // userId -> grace timer
+      botTimer: null, // practice: fills the table with a bot after a wait
+      botMoveTimer: null,
       skipCount: 0,
       createdAt: Date.now(),
     };
     this._seatUser(room, user, clientSeed);
     this.rooms.set(room.id, room);
+    // Practice tables must never leave someone staring at an empty lobby: if no
+    // human arrives within the wait window, a bot sits down and the game starts.
+    if (isPractice) this._armBotFill(room);
     return room;
   }
 
@@ -129,7 +174,10 @@ export class GameManager {
     if (room.status !== 'waiting') throw new GameError('Game already started', 'ALREADY_STARTED');
     if (room.seats.length >= room.maxPlayers) throw new GameError('Room is full', 'ROOM_FULL');
     if (this._roomOf(user.id)) throw new GameError('You are already in a game', 'ALREADY_IN_GAME');
-    if ((await wallet.getBalance(user.id)) < room.stake) {
+    if (!room.isPractice && user.isGuest) {
+      throw new GameError('Sign in to play with coins', 'GUEST_FORBIDDEN');
+    }
+    if (!room.isPractice && (await wallet.getBalance(user.id)) < room.stake) {
       throw new GameError('Not enough coins for this stake', 'INSUFFICIENT_FUNDS');
     }
 
@@ -146,16 +194,19 @@ export class GameManager {
   // Random matchmaking: drop the player into any waiting PUBLIC room at the same
   // stake AND player count, or open a new public one. The game only starts once
   // that many real players have joined (no bots, no early start).
-  async quickMatch(user, stake, maxPlayers = 2, onSeated, clientSeed) {
-    this._validateStake(stake);
-    if (![2, 3, 4].includes(maxPlayers)) {
-      throw new GameError('A game must have 2, 3, or 4 players', 'BAD_MAX_PLAYERS');
+  async quickMatch(user, stake, maxPlayers = 2, onSeated, clientSeed, isPractice = false) {
+    if (!isPractice && user.isGuest) {
+      throw new GameError('Sign in to play with coins', 'GUEST_FORBIDDEN');
     }
+    this._validateStake(stake, { practice: isPractice });
+    this._validatePlayerCount(maxPlayers);
     if (this._roomOf(user.id)) throw new GameError('You are already in a game', 'ALREADY_IN_GAME');
 
+    // Prefer a real opponent: look for a waiting table of the same kind first.
     for (const room of this.rooms.values()) {
       if (
         !room.isPrivate &&
+        !!room.isPractice === !!isPractice &&
         room.status === 'waiting' &&
         room.stake === stake &&
         room.maxPlayers === maxPlayers &&
@@ -166,9 +217,80 @@ export class GameManager {
         return room;
       }
     }
-    const room = await this.createRoom(user, { stake, maxPlayers, isPrivate: false, clientSeed });
+    const room = await this.createRoom(user, { stake, maxPlayers, isPrivate: false, clientSeed, isPractice });
     if (onSeated) onSeated(room);
     return room;
+  }
+
+  // ── practice bots ────────────────────────────────────────────────────────
+
+  // Wait a while for a human; if the table hasn't filled, seat bot(s) and start.
+  _armBotFill(room) {
+    this._clearBotFill(room);
+    room.botJoinsAt = Date.now() + config.practice.botWaitMs;
+    room.botTimer = setTimeout(() => {
+      room.botTimer = null;
+      room.botJoinsAt = null;
+      if (room.status !== 'waiting') return;
+      while (room.seats.length < room.maxPlayers) {
+        const botId = makeBotId();
+        room.seats.push({
+          userId: botId,
+          name: 'Computer',
+          picture: null,
+          color: COLORS[room.seats.length],
+          connected: true,
+          isBot: true,
+          clientSeed: '',
+        });
+        // Bots act through the same public API as players, so they need the same
+        // user→room mapping or handleRoll/handleMove can't find their game.
+        this.userRoom.set(botId, room.id);
+      }
+      this._emitRoom(room, 'room:update', this.serializeRoom(room));
+      this._startGame(room).catch(() => {});
+    }, config.practice.botWaitMs);
+    room.botTimer.unref?.();
+  }
+
+  _clearBotFill(room) {
+    room.botJoinsAt = null;
+    if (room.botTimer) {
+      clearTimeout(room.botTimer);
+      room.botTimer = null;
+    }
+  }
+
+  // If it's a bot's turn, play it after a short, human-feeling pause.
+  _maybeBotTurn(room) {
+    if (room.botMoveTimer) {
+      clearTimeout(room.botMoveTimer);
+      room.botMoveTimer = null;
+    }
+    const engine = room.engine;
+    if (!engine || engine.phase === 'finished' || room.status !== 'playing') return;
+
+    const current = engine.currentPlayerId();
+    if (!isBotId(current)) return;
+
+    const { botMinThinkMs: lo, botMaxThinkMs: hi } = config.practice;
+    const delay = lo + Math.random() * Math.max(0, hi - lo);
+    room.botMoveTimer = setTimeout(async () => {
+      room.botMoveTimer = null;
+      try {
+        if (room.status !== 'playing' || engine.phase === 'finished') return;
+        if (engine.currentPlayerId() !== current) return; // turn moved on
+        if (engine.phase === 'awaitingRoll') {
+          this.handleRoll(current);
+        } else if (engine.phase === 'awaitingMove') {
+          const tokenIndex = chooseMove(engine.getState(), current);
+          if (tokenIndex != null) await this.handleMove(current, tokenIndex);
+        }
+      } catch {
+        /* a bot must never be able to crash the room */
+      }
+    }, delay);
+    room.botMoveTimer.unref?.();
   }
 
   _seatUser(room, user, clientSeed) {
@@ -187,6 +309,31 @@ export class GameManager {
   // ── game lifecycle ──────────────────────────────────────────────────────
 
   async _startGame(room) {
+    this._clearBotFill(room); // table filled — no bot needed (or already added)
+
+    // Practice games are free: no balance checks, no escrow, nothing on the ledger.
+    if (room.isPractice) {
+      room.pot = 0;
+      room.dice.setClientSeed(room.seats.map((s) => s.clientSeed).filter(Boolean).join(':'));
+      room.engine = new LudoEngine({
+        players: room.seats.map((s) => ({ id: s.userId, name: s.name, color: s.color })),
+        rules: room.rules,
+      });
+      room.status = 'playing';
+      room.skipCount = 0;
+      this._emitRoom(room, 'game:start', {
+        room: this.serializeRoom(room),
+        state: room.engine.getState(),
+        commitment: room.dice.commitment(),
+        pot: 0,
+        stake: 0,
+        turnTimeoutMs: config.economy.turnTimeoutMs,
+      });
+      this._armTurn(room);
+      this._maybeBotTurn(room);
+      return;
+    }
+
     // Anyone who can no longer cover the stake is ejected (with a notice) so the
     // room drops below full and can take a replacement — instead of deadlocking
     // full-but-unstartable.
@@ -247,6 +394,7 @@ export class GameManager {
 
     this._emitRoom(room, 'game:rolled', { die, result, state: room.engine.getState() });
     this._armTurn(room);
+    this._maybeBotTurn(room);
     return result;
   }
 
@@ -265,6 +413,7 @@ export class GameManager {
 
     this._emitRoom(room, 'game:moved', { result, state: room.engine.getState() });
     this._armTurn(room);
+    this._maybeBotTurn(room);
     return result;
   }
 
@@ -275,6 +424,7 @@ export class GameManager {
     if (!room) return;
 
     if (room.status === 'waiting') {
+      this._leaveChannel(room, userId);
       this._removeSeat(room, userId);
       if (room.seats.length === 0) this._destroyRoom(room);
       else this._emitRoom(room, 'room:update', this.serializeRoom(room));
@@ -314,13 +464,27 @@ export class GameManager {
       note: { type: 'skip', playerId: pid, reason: 'timeout' },
     });
 
-    // If the table has gone idle for too many turns in a row, abort & refund so
-    // nobody's stake is held hostage by an AFK opponent.
+    // The table has gone idle for too many turns in a row. Decide it on the
+    // board rather than voiding it: a knockout bracket cannot advance on a match
+    // with no result, and whoever was ahead earned that lead. Only a game where
+    // literally nobody moved is refunded instead — there is no result to read
+    // off an empty board, and no one earned a pot by going AFK first.
     if (room.skipCount >= room.seats.length * 4) {
-      this._abortGame(room, 'inactivity');
+      const played = room.engine.standings().some((p) => p.steps > 0 || p.home > 0);
+      if (played) {
+        const decided = room.engine.finishByProgress('inactivity');
+        this._emitRoom(room, 'game:state', {
+          state: room.engine.getState(),
+          note: { type: 'decided', reason: 'inactivity' },
+        });
+        this._settleWinner(room, decided.winnerId, { endedBy: 'inactivity' });
+      } else {
+        this._abortGame(room, 'inactivity');
+      }
       return;
     }
     this._armTurn(room);
+    this._maybeBotTurn(room);
   }
 
   // ── settlement ────────────────────────────────────────────────────────────
@@ -331,6 +495,23 @@ export class GameManager {
   async _settleWinner(room, winnerId, extra = {}) {
     this._clearTurn(room);
     const engine = room.engine;
+
+    // Practice: nothing is staked, so nothing is paid, recorded or ranked.
+    if (room.isPractice) {
+      room.status = 'finished';
+      this._emitRoom(room, 'game:over', {
+        state: engine.getState(),
+        winnerId,
+        pot: 0,
+        payout: 0,
+        rake: 0,
+        isPractice: true,
+        fairness: room.dice.reveal(),
+        ...(extra.endedBy ? { reason: extra.endedBy } : {}),
+      });
+      this._destroyRoom(room, 60_000);
+      return;
+    }
 
     const settle = await wallet.settlePot(room.id, winnerId, room.pot, config.economy.rakeBips);
     for (const s of room.seats) {
@@ -386,18 +567,26 @@ export class GameManager {
 
     // Still going with 3–4 players: free the leaver to play elsewhere, but keep
     // their seat for the record. Their tokens are already off the board.
-    this.userRoom.delete(leaverId);
+    this._leaveChannel(room, leaverId);
+    if (this.userRoom.get(leaverId) === room.id) this.userRoom.delete(leaverId);
     this._clearDisconnectTimer(room, leaverId);
     this._emitRoom(room, 'game:state', {
       state: room.engine.getState(),
       note: { type: 'forfeit', playerId: leaverId },
     });
     this._armTurn(room);
+    this._maybeBotTurn(room);
   }
 
   async _abortGame(room, reason) {
     this._clearTurn(room);
     const userIds = room.seats.map((s) => s.userId);
+    if (room.isPractice) {
+      room.status = 'finished';
+      this._emitRoom(room, 'game:aborted', { reason, refunded: 0, isPractice: true });
+      this._destroyRoom(room, 30_000);
+      return;
+    }
     await wallet.refundStakes(room.id, userIds, room.stake);
     room.status = 'finished';
     this._emitRoom(room, 'game:aborted', { reason, refunded: room.stake });
@@ -409,7 +598,7 @@ export class GameManager {
 
   // ── connection bookkeeping ─────────────────────────────────────────────────
 
-  markConnected(userId, connected) {
+  async markConnected(userId, connected) {
     const room = this._roomOf(userId);
     if (!room) return;
     const seat = room.seats.find((s) => s.userId === userId);
@@ -421,11 +610,16 @@ export class GameManager {
       return;
     }
 
-    // Disconnected.
+    // Disconnected — but a user may have several sockets (multiple tabs). Only
+    // treat them as gone when NO socket of theirs remains, so closing one tab
+    // never forfeits a game they're still playing in another.
+    if (await this._hasLiveSocket(userId)) return;
+
     if (seat) seat.connected = false;
 
     if (room.status === 'waiting') {
       // Nothing is staked yet — just drop them from the waiting room.
+      this._leaveChannel(room, userId);
       this._removeSeat(room, userId);
       if (room.seats.length === 0) this._destroyRoom(room);
       else this._emitRoom(room, 'room:update', this.serializeRoom(room));
@@ -437,13 +631,25 @@ export class GameManager {
       // Give them a grace period to reconnect; if they don't, they forfeit so
       // the opponent isn't left waiting on a rage-quitter for minutes.
       if (!room.disconnectTimers.has(userId)) {
-        const timer = setTimeout(() => {
+        const timer = setTimeout(async () => {
           room.disconnectTimers.delete(userId);
+          // Re-check at fire time: they may have reconnected on another socket.
+          if (await this._hasLiveSocket(userId)) return;
           this.handleLeave(userId).catch(() => {});
         }, config.economy.disconnectGraceMs);
         timer.unref?.();
         room.disconnectTimers.set(userId, timer);
       }
+    }
+  }
+
+  // Does this user still have at least one connected socket?
+  async _hasLiveSocket(userId) {
+    try {
+      const sockets = await this.io.in(`user:${userId}`).fetchSockets();
+      return sockets.length > 0;
+    } catch {
+      return false; // no adapter (e.g. in tests) — treat as fully disconnected
     }
   }
 
@@ -477,12 +683,25 @@ export class GameManager {
 
   _destroyRoom(room, delayMs = 0) {
     // Free players to start a new game immediately, and cancel any pending timers.
-    for (const s of room.seats) this.userRoom.delete(s.userId);
+    // Only clear a mapping that still points HERE — a player may already have
+    // joined a new room, and we must not orphan them from it.
+    for (const s of room.seats) {
+      if (this.userRoom.get(s.userId) === room.id) this.userRoom.delete(s.userId);
+    }
     if (room.disconnectTimers) {
       for (const t of room.disconnectTimers.values()) clearTimeout(t);
       room.disconnectTimers.clear();
     }
+    this._clearBotFill(room);
+    if (room.botMoveTimer) {
+      clearTimeout(room.botMoveTimer);
+      room.botMoveTimer = null;
+    }
     this._clearTurn(room);
+    // Empty the broadcast channel NOW (the final event has already been emitted).
+    // Anything this room might still emit must not reach a player who has moved
+    // on to a new game.
+    this.io.socketsLeave(`room:${room.id}`);
     const remove = () => this.rooms.delete(room.id);
     if (delayMs > 0) setTimeout(remove, delayMs).unref?.();
     else remove();

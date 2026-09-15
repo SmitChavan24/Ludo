@@ -1,23 +1,56 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '../store/auth.js';
 import { useGame } from '../store/game.js';
+import { useAppConfig } from '../store/appConfig.js';
 import { gameApi } from '../api/socket.js';
-import { STAKES } from '../config.js';
+import { apiFetch } from '../api/http.js';
+import { shareInvite, inviteUrl } from '../util/share.js';
 import StatsModal from './StatsModal.jsx';
+import FairnessInfo from './FairnessInfo.jsx';
+import PushToggle from './PushToggle.jsx';
+import WalletModal from './WalletModal.jsx';
+import { usePushStatus } from '../hooks/usePushStatus.js';
+import Tournaments from './Tournaments.jsx';
+import TournamentModal from './TournamentModal.jsx';
 
 export default function Lobby() {
   const user = useAuth((s) => s.user);
+  const accessToken = useAuth((s) => s.accessToken);
   const logout = useAuth((s) => s.logout);
   const claimDailyBonus = useAuth((s) => s.claimDailyBonus);
   const setError = useGame((s) => s.setError);
+  const presence = useGame((s) => s.presence);
+  const { stakes, playerCounts, rakeBips, referralBonus } = useAppConfig();
 
-  const [players, setPlayers] = useState(2);
-  const [stake, setStake] = useState(STAKES[1]);
+  const [players, setPlayers] = useState(playerCounts[0] ?? 2);
+  const [stake, setStake] = useState(stakes[0] ?? 50);
   const [joinCode, setJoinCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [bonusMsg, setBonusMsg] = useState(null);
   const [copied, setCopied] = useState(null);
   const [statsTab, setStatsTab] = useState(null);
+  const [showFairness, setShowFairness] = useState(false);
+  const [referral, setReferral] = useState(null);
+  const [shareMsg, setShareMsg] = useState(null);
+  const [showWallet, setShowWallet] = useState(false);
+  const pushStatus = usePushStatus();
+  const [openTournament, setOpenTournament] = useState(null);
+  const [cashInr, setCashInr] = useState(null);
+
+  // Keep selections inside whatever the server currently allows.
+  useEffect(() => {
+    if (!stakes.includes(stake)) setStake(stakes[0]);
+    if (!playerCounts.includes(players)) setPlayers(playerCounts[0]);
+  }, [stakes, playerCounts]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    apiFetch('/me/referral', { token: accessToken })
+      .then(setReferral)
+      .catch(() => {});
+    apiFetch('/wallet', { token: accessToken })
+      .then((wl) => setCashInr(wl.cashInr))
+      .catch(() => {});
+  }, [accessToken, showWallet]);
 
   const run = (fn) => async () => {
     setBusy(true);
@@ -54,14 +87,26 @@ export default function Lobby() {
     });
   };
 
+  const onShareInvite = async () => {
+    const res = await shareInvite(referral?.code, referral?.bonusPerInvite ?? referralBonus);
+    if (res === 'copied') setShareMsg('Invite link copied!');
+    else if (res === 'failed') setShareMsg('Could not open share');
+    if (res) setTimeout(() => setShareMsg(null), 2500);
+  };
+
   const winRate = user.gamesPlayed ? Math.round((user.gamesWon / user.gamesPlayed) * 100) : 0;
   const tooPoor = stake > user.coins;
+  const pot = stake * players;
 
   return (
     <div className="lobby">
       <header className="topbar">
         <div className="brand-sm">🎲 CoinLudo</div>
-        <div className="wallet-chip" title="Your coins">🪙 {user.coins.toLocaleString('en-IN')}</div>
+        <button className="wallet-chip wallet-open" onClick={() => setShowWallet(true)} title="Open wallet">
+          <span className="chip-cash">₹{Number(cashInr ?? 0).toLocaleString('en-IN')}</span>
+          <span className="chip-sep" />
+          <span className="chip-coins">🪙 {user.coins.toLocaleString('en-IN')}</span>
+        </button>
       </header>
 
       <section className="profile-row">
@@ -77,12 +122,6 @@ export default function Lobby() {
         <button className="btn btn-ghost btn-sm" onClick={logout}>Logout</button>
       </section>
 
-      {/* Player ID — give this to support to top up coins */}
-      <button className="id-chip" onClick={() => copy(user.id, 'id')} title="Tap to copy">
-        <span>Player ID: <code>{user.id}</code></span>
-        <span className="id-copy">{copied === 'id' ? 'Copied ✓' : '📋 Copy'}</span>
-      </button>
-
       <button className="bonus-btn" onClick={onBonus}>
         🎁 Claim daily bonus {bonusMsg && <span className="bonus-flash">{bonusMsg}</span>}
       </button>
@@ -92,39 +131,96 @@ export default function Lobby() {
         <button className="stat-btn" onClick={() => setStatsTab('history')}>📜 My Games</button>
       </div>
 
+      <Tournaments onOpen={setOpenTournament} />
+
       {/* ── Random matchmaking (the main way to play) ── */}
       <section className="card hero-card">
-        <h2>Play online</h2>
-        <p className="card-sub">Get matched with random players. The game starts when the table is full.</p>
-
-        <label className="field-label">Players</label>
-        <div className="seg">
-          {[2, 3, 4].map((n) => (
-            <button key={n} className={`seg-btn ${players === n ? 'active' : ''}`} onClick={() => setPlayers(n)}>
-              {n} Players
-            </button>
-          ))}
+        <div className="hero-head">
+          <h2>Play online</h2>
+          <span className="live-chip" title="Players connected right now">
+            <span className={`live-dot ${presence.online > 0 ? 'on' : ''}`} />
+            {presence.online} online
+          </span>
         </div>
+        <p className="card-sub">
+          {presence.waiting > 0
+            ? `${presence.waiting} player${presence.waiting > 1 ? 's' : ''} looking for a match right now.`
+            : 'Get matched with a random player. The game starts when the table is full.'}
+        </p>
 
-        <label className="field-label">Stake</label>
-        <div className="stake-grid">
-          {STAKES.map((s) => (
-            <button
-              key={s}
-              className={`stake-pill ${stake === s ? 'active' : ''} ${s > user.coins ? 'disabled' : ''}`}
-              disabled={s > user.coins}
-              onClick={() => setStake(s)}
-            >
-              🪙 {s}
-            </button>
-          ))}
-        </div>
+        {playerCounts.length > 1 && (
+          <>
+            <label className="field-label">Players</label>
+            <div className="seg">
+              {playerCounts.map((n) => (
+                <button key={n} className={`seg-btn ${players === n ? 'active' : ''}`} onClick={() => setPlayers(n)}>
+                  {n} Players
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        {stakes.length > 1 && (
+          <>
+            <label className="field-label">Stake</label>
+            <div className="stake-grid">
+              {stakes.map((s) => (
+                <button
+                  key={s}
+                  className={`stake-pill ${stake === s ? 'active' : ''} ${s > user.coins ? 'disabled' : ''}`}
+                  disabled={s > user.coins}
+                  onClick={() => setStake(s)}
+                >
+                  🪙 {s}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
 
         <button className="btn btn-primary btn-block btn-lg" disabled={busy || tooPoor} onClick={onQuick}>
-          ⚡ Find {players}-Player Match · 🪙 {stake}
+          ⚡ Play Now · 🪙 {stake}
         </button>
-        <p className="hint">Winner takes the pot of 🪙 {stake * players}. Platform fee 5%.</p>
+        <p className="hint">
+          {tooPoor ? 'Not enough coins for this stake.' : `Winner takes 🪙 ${pot} · ${rakeBips / 100}% platform fee`}
+        </p>
       </section>
+
+      {/* ── Invite friends (referral) ── */}
+      <section className="card invite-card">
+        <h2>Invite friends, both get coins</h2>
+        <p className="card-sub">
+          You and your friend each get 🪙 {referral?.bonusPerInvite ?? referralBonus} when they join with your link.
+        </p>
+        <button className="btn btn-whatsapp btn-block" onClick={onShareInvite}>
+          Share invite link
+        </button>
+        {referral?.code && (
+          <button className="code-row" onClick={() => copy(inviteUrl(referral.code), 'invite')}>
+            <span>Your code: <b>{referral.code}</b></span>
+            <span className="id-copy">{copied === 'invite' ? 'Copied ✓' : '📋 Copy link'}</span>
+          </button>
+        )}
+        {referral?.invited > 0 && (
+          <p className="invite-stat">
+            🎉 {referral.invited} joined · earned 🪙 {referral.earned.toLocaleString('en-IN')}
+          </p>
+        )}
+        {shareMsg && <p className="invite-stat">{shareMsg}</p>}
+      </section>
+
+      {/* Only shown while notifications still need turning on. Once they're
+          subscribed there is nothing to act on, so the card disappears. */}
+      {!pushStatus.loading && pushStatus.needsAction && (
+        <section className="card alerts-card">
+          <h2>{pushStatus.denied ? '🔕 Notifications are blocked' : '🔔 Turn on match alerts'}</h2>
+          <p className="card-sub">
+            Tournaments run at a set time — without notifications you may miss your match and lose your entry.
+          </p>
+          <PushToggle onEnabled={() => pushStatus.setEnabled(true)} />
+        </section>
+      )}
 
       {/* ── Private friend game ── */}
       <section className="card">
@@ -143,9 +239,27 @@ export default function Lobby() {
         </div>
       </section>
 
-      <footer className="lobby-foot">Server-verified moves · Provably-fair dice 🔒</footer>
+      <button className="id-chip" onClick={() => copy(user.id, 'id')} title="Give this to support for coin top-ups">
+        <span>Player ID: <code>{user.id}</code></span>
+        <span className="id-copy">{copied === 'id' ? 'Copied ✓' : '📋 Copy'}</span>
+      </button>
+
+      <footer className="lobby-foot">
+        <button className="foot-link" onClick={() => setShowFairness(true)}>
+          Server-verified moves · Provably-fair dice 🔒 <span className="foot-more">How it works</span>
+        </button>
+      </footer>
 
       {statsTab && <StatsModal initialTab={statsTab} onClose={() => setStatsTab(null)} />}
+      {showFairness && <FairnessInfo onClose={() => setShowFairness(false)} />}
+      {showWallet && <WalletModal onClose={() => setShowWallet(false)} />}
+      {openTournament && (
+        <TournamentModal
+          id={openTournament}
+          onClose={() => setOpenTournament(null)}
+          onNeedWallet={() => { setOpenTournament(null); setShowWallet(true); }}
+        />
+      )}
     </div>
   );
 }
