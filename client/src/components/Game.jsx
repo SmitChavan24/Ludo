@@ -277,7 +277,6 @@ export default function Game() {
   // had no legal move and the turn passed straight on.
   const dieValue = rolling ? rollFace : state.lastDie ?? lastRoll;
   const roller = rolling ? currentPlayer : state.players.find((p) => p.id === (state.lastDie ? state.currentPlayerId : lastRoller));
-  const rollCaption = !rolling && dieValue && roller ? `${roller.id === myId ? 'You' : nameOf(roller)} rolled ${dieValue}` : null;
 
   const onRoll = async () => {
     if (rolling) return;
@@ -399,11 +398,6 @@ export default function Game() {
           size={canRoll ? 76 : 64}
           color={roller?.color}
         />
-        {rollCaption && (
-          <span className={`roll-caption c-${roller.color}`}>
-            <span className={`dot c-${roller.color}`} /> {rollCaption}
-          </span>
-        )}
         {state.status === 'finished' ? (
           <span className="turn-note">Game over</span>
         ) : paused ? (
