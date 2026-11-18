@@ -7,11 +7,10 @@ import { apiFetch } from '../api/http.js';
 import { shareInvite, inviteUrl } from '../util/share.js';
 import StatsModal from './StatsModal.jsx';
 import FairnessInfo from './FairnessInfo.jsx';
-import PushToggle from './PushToggle.jsx';
 import WalletModal from './WalletModal.jsx';
 import CoinShopModal from './CoinShopModal.jsx';
+import InstallPrompt from './InstallPrompt.jsx';
 import { takeReturnedCoinOrder } from '../util/coinOrder.js';
-import { usePushStatus } from '../hooks/usePushStatus.js';
 import Tournaments from './Tournaments.jsx';
 import TournamentModal from './TournamentModal.jsx';
 
@@ -35,7 +34,6 @@ export default function Lobby() {
   const [referral, setReferral] = useState(null);
   const [shareMsg, setShareMsg] = useState(null);
   const [showWallet, setShowWallet] = useState(false);
-  const pushStatus = usePushStatus();
   const [openTournament, setOpenTournament] = useState(null);
   const [cashInr, setCashInr] = useState(null);
   // Back from paying on pay.billtrack.me → open the shop to confirm the order.
@@ -235,17 +233,8 @@ export default function Lobby() {
         {shareMsg && <p className="invite-stat">{shareMsg}</p>}
       </section>
 
-      {/* Only shown while notifications still need turning on. Once they're
-          subscribed there is nothing to act on, so the card disappears. */}
-      {!pushStatus.loading && pushStatus.needsAction && (
-        <section className="card alerts-card">
-          <h2>{pushStatus.denied ? '🔕 Notifications are blocked' : '🔔 Turn on match alerts'}</h2>
-          <p className="card-sub">
-            Tournaments run at a set time — without notifications you may miss your match and lose your entry.
-          </p>
-          <PushToggle onEnabled={() => pushStatus.setEnabled(true)} />
-        </section>
-      )}
+
+      <InstallPrompt />
 
       {/* ── Private friend game ── */}
       <section className="card">

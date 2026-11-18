@@ -136,8 +136,10 @@ export const config = {
     // Tournaments genuinely depend on it (players must be reachable when their
     // match is drawn). Gating practice too is a conversion trade-off — it asks
     // for a scary permission before the player has seen any value.
-    requireForTournaments: process.env.REQUIRE_PUSH_TOURNAMENTS !== 'false',
-    requireForPractice: process.env.REQUIRE_PUSH_PRACTICE !== 'false',
+    // Optional by default: notifications are never required to play. Set to
+    // "true" only if you deliberately want to gate entry on them.
+    requireForTournaments: process.env.REQUIRE_PUSH_TOURNAMENTS === 'true',
+    requireForPractice: process.env.REQUIRE_PUSH_PRACTICE === 'true',
   },
   // Practice mode: anyone can play a no-stakes game without an account. A bot
   // fills the table if no real opponent turns up, so a first-time visitor can

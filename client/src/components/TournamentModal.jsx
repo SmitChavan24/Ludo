@@ -115,7 +115,7 @@ export default function TournamentModal({ id, onClose, onNeedWallet }) {
           {/* ── Joining ── */}
           {d.joined ? (
             <div className="t-joined">
-              ✅ You’re in. We’ll notify you when the lobby opens.
+              ✅ You’re in. Be here at {when(t.startsAt)}: your first match starts then.
               {t.status === 'open' && (
                 <button
                   className="btn btn-ghost btn-block btn-sm"
@@ -131,7 +131,7 @@ export default function TournamentModal({ id, onClose, onNeedWallet }) {
           ) : full ? (
             <p className="t-closed">This tournament is full.</p>
           ) : d.myClaim?.status === 'pending' ? (
-            <p className="t-closed">⏳ Your payment is being checked. You’ll get a notification once it’s confirmed.</p>
+            <p className="t-closed">⏳ Your payment is being checked. Check back shortly.</p>
           ) : t.entryType === 'balance' ? (
             <>
               <button

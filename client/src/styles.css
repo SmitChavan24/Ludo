@@ -519,3 +519,5 @@ input:focus { border-color: var(--primary); }
 .die-by.c-red { --rc: var(--red); } .die-by.c-green { --rc: var(--green); }
 .die-by.c-yellow { --rc: var(--yellow); } .die-by.c-blue { --rc: var(--blue); }
 .roll-caption { display: flex; align-items: center; gap: 6px; font-weight: 800; font-size: 14px; }
+.install-steps { margin: 6px 0 10px; padding-left: 20px; font-size: 13.5px; line-height: 1.55; }
+.install-steps li { margin: 2px 0; }

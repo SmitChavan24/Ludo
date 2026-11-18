@@ -1,31 +1,56 @@
 import { useEffect, useState } from 'react';
 import { canInstall, promptInstall, onInstallStateChange, isStandalone, isIos } from '../util/install.js';
 
-// "Add to home screen" nudge. Shown when the browser says we're installable,
-// or on iOS (which has no install API) when running in a normal tab.
+// "Install the app" card. Shown on every visit until CoinLudo is installed:
+// "Not now" only hides it for the current visit (sessionStorage), so it comes
+// back next time. It disappears for good once installed, or when the app is
+// opened from the home screen.
+//
+// Where the browser offers its own install dialog (Chrome / Edge on Android
+// and desktop) one tap opens it. Everywhere else it shows the manual steps.
+const KEY = 'coinludo-install-snoozed';
+
+const isAndroid = () => typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
+
 export default function InstallPrompt({ reason = null }) {
   const [, force] = useState(0);
-  const [dismissed, setDismissed] = useState(() => {
+  const [installed, setInstalled] = useState(isStandalone());
+  const [snoozed, setSnoozed] = useState(() => {
     try {
-      return sessionStorage.getItem('coinludo-install-dismissed') === '1';
+      return sessionStorage.getItem(KEY) === '1';
     } catch {
       return false;
     }
   });
 
-  useEffect(() => onInstallStateChange(() => force((n) => n + 1)), []);
+  useEffect(
+    () =>
+      onInstallStateChange(() => {
+        setInstalled(isStandalone());
+        force((n) => n + 1);
+      }),
+    [],
+  );
+  useEffect(() => {
+    const done = () => setInstalled(true);
+    window.addEventListener('appinstalled', done);
+    return () => window.removeEventListener('appinstalled', done);
+  }, []);
 
-  if (isStandalone() || dismissed) return null;
-  const ios = isIos();
-  if (!canInstall() && !ios) return null;
+  if (installed || isStandalone() || snoozed) return null;
 
-  const dismiss = () => {
+  const snooze = () => {
     try {
-      sessionStorage.setItem('coinludo-install-dismissed', '1');
+      sessionStorage.setItem(KEY, '1');
     } catch {
       /* ignore */
     }
-    setDismissed(true);
+    setSnoozed(true);
+  };
+
+  const install = async () => {
+    const outcome = await promptInstall();
+    if (outcome === 'accepted') setInstalled(true);
   };
 
   return (
@@ -35,23 +60,34 @@ export default function InstallPrompt({ reason = null }) {
         <div>
           <div className="install-title">Install CoinLudo</div>
           <div className="install-sub">
-            {reason || 'Add it to your home screen — faster to open, and it works like a real app.'}
+            {reason || 'Play from your home screen: opens instantly, full screen, like a real app.'}
           </div>
         </div>
       </div>
 
-      {ios ? (
-        <p className="install-ios">
-          In Safari: tap <b>Share</b> <span aria-hidden>􀈂</span> → <b>Add to Home Screen</b>.
-          <br />
-          <em>On iPhone, notifications only work after installing.</em>
-        </p>
-      ) : (
-        <button className="btn btn-primary btn-block" onClick={() => promptInstall()}>
+      {canInstall() ? (
+        <button className="btn btn-primary btn-block" onClick={install}>
           Install app
         </button>
+      ) : isIos() ? (
+        <ol className="install-steps">
+          <li>Tap <b>Share</b> (the square with an arrow) at the bottom of Safari.</li>
+          <li>Scroll down and tap <b>Add to Home Screen</b>.</li>
+          <li>Tap <b>Add</b>.</li>
+        </ol>
+      ) : isAndroid() ? (
+        <ol className="install-steps">
+          <li>Tap the browser menu <b>⋮</b> (top right).</li>
+          <li>Tap <b>Install app</b> or <b>Add to Home screen</b>.</li>
+          <li>Tap <b>Install</b>.</li>
+        </ol>
+      ) : (
+        <ol className="install-steps">
+          <li>Click the <b>install icon</b> at the right end of the address bar,</li>
+          <li>or open the browser menu and choose <b>Install CoinLudo</b>.</li>
+        </ol>
       )}
-      <button className="btn btn-ghost btn-block btn-sm" onClick={dismiss}>Not now</button>
+      <button className="btn btn-ghost btn-block btn-sm" onClick={snooze}>Not now</button>
     </div>
   );
 }

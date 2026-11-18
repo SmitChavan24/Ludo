@@ -185,7 +185,7 @@ export default function Login() {
 
         {err && <p className="error-text">{err}</p>}
 
-        <InstallPrompt reason="Install CoinLudo for reliable match notifications." />
+        <InstallPrompt />
 
         <p className="fine-print">
           Sign in to join <b>Ludo tournaments</b> and climb the leaderboard.
