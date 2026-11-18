@@ -380,7 +380,7 @@ export default function Game() {
               <span className={`dot c-${currentPlayer?.color}`} />
               <span className="tb-text">
                 <b>{nameOf(currentPlayer)}’s turn</b>
-                <small>{state.phase === 'awaitingMove' && state.lastDie ? `Rolled ${state.lastDie}, choosing a move…` : 'Rolling…'} Wait for your turn.</small>
+                {state.phase === 'awaitingMove' && state.lastDie && <small>Rolled {state.lastDie}, choosing a move…</small>}
               </span>
               <span className="tb-time">{secondsLeft}s</span>
             </>
@@ -412,11 +412,7 @@ export default function Game() {
           <span className="turn-note mine">▲ Tap to roll</span>
         ) : mustMove ? (
           <span className="turn-note mine">Tap a glowing token on the board</span>
-        ) : (
-          <span className="turn-note">
-            <span className={`dot c-${currentPlayer?.color}`} /> Not your turn
-          </span>
-        )}
+        ) : null}
       </div>
 
       {status === 'finished' && result && (
