@@ -135,7 +135,7 @@ export default function Login() {
           <span className="brand-logo">🎲</span>
           <h1>CoinLudo</h1>
         </div>
-        <p className="tagline">Play Ludo online. Win real cash prizes.</p>
+        <p className="tagline">Play Ludo online. Compete in tournaments.</p>
 
         {/* Notifications are mandatory: tournaments are scheduled events, and a
             player who can't be reached can't be told their match has started. */}
@@ -188,7 +188,7 @@ export default function Login() {
         <InstallPrompt reason="Install CoinLudo for reliable match notifications." />
 
         <p className="fine-print">
-          Sign in to join <b>cash tournaments</b> and win real prizes with your skills.
+          Sign in to join <b>Ludo tournaments</b> and climb the leaderboard.
         </p>
         <p className="eligibility">18+ only. Entry fees apply. Play where permitted by local law.</p>
       </div>

@@ -48,4 +48,8 @@ export const store = {
   listTournamentsForUser: (...a) => backend.listTournamentsForUser(...a),
   setReferredBy: (...a) => backend.setReferredBy(...a),
   countReferrals: (...a) => backend.countReferrals(...a),
+  createCoinOrder: (...a) => backend.createCoinOrder(...a),
+  getCoinOrder: (...a) => backend.getCoinOrder(...a),
+  updateCoinOrder: (...a) => backend.updateCoinOrder(...a),
+  listCoinOrders: (...a) => backend.listCoinOrders(...a),
 };

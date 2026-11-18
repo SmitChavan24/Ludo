@@ -47,7 +47,7 @@ export default function GameOver({ result, myId, players, onAgain, isPractice = 
       {/* Practice is the top of the funnel — this is the moment to convert. */}
       {isPractice && (
         <div className="signin-cta">
-          <p>Ready to play for real? Sign in to join <b>cash tournaments</b> and win real prizes with your skills.</p>
+          <p>Enjoyed it? Sign in to join <b>Ludo tournaments</b> and climb the leaderboard.</p>
           <button className="btn btn-primary btn-block" onClick={() => useAuth.getState().logout()}>
             Sign in with Google
           </button>

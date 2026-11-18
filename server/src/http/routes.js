@@ -20,6 +20,7 @@ import { upiPayLink } from '../util/payments.js';
 import { push } from '../push/PushService.js';
 import { cash } from '../cash/CashService.js';
 import { cashAccount } from '../wallet/accounts.js';
+import { shop, publicOrder } from '../shop/CoinShop.js';
 
 export const router = Router();
 
@@ -49,8 +50,46 @@ router.get('/config', (req, res) => {
     pushRequiredForTournaments: config.push.enabled && config.push.requireForTournaments,
     practiceEnabled: config.practice.enabled,
     practiceBotWaitMs: config.practice.botWaitMs,
-    payments: config.payments,
+    payments: config.cashEnabled ? config.payments : {},
+    cashEnabled: config.cashEnabled,
+    shopEnabled: shop.enabled,
   });
+});
+
+// Answer 404 for real-money endpoints when cash features are switched off.
+function requireCash(req, res, next) {
+  if (!config.cashEnabled) return res.status(404).json({ error: 'Not available', code: 'CASH_DISABLED' });
+  next();
+}
+
+// ── Coin shop (packs paid on pay.billtrack.me) ──
+router.get('/shop/packs', (req, res) => {
+  res.json({ enabled: shop.enabled, packs: shop.enabled ? shop.packs() : [] });
+});
+
+router.post('/shop/orders', requireAuth, requireAccount, authLimiter, async (req, res) => {
+  try {
+    const order = await shop.createOrder(req.user, String(req.body?.packId || ''));
+    res.status(201).json({ order: publicOrder(order) });
+  } catch (e) {
+    res.status(e.status || 400).json({ error: e.message, code: e.code });
+  }
+});
+
+router.get('/shop/orders', requireAuth, requireAccount, async (req, res) => {
+  const orders = await store.listCoinOrders({ userId: req.user.id, limit: 20 });
+  res.json({ orders: orders.map(publicOrder) });
+});
+
+// The return page calls this. It re-checks with the pay server, so it is the
+// server's answer that counts, not the redirect the browser came back with.
+router.post('/shop/orders/:id/sync', requireAuth, requireAccount, async (req, res) => {
+  try {
+    const order = await shop.syncForUser(req.user, req.params.id);
+    res.json({ order: publicOrder(order), coins: await wallet.getBalance(req.user.id) });
+  } catch (e) {
+    res.status(e.status || 400).json({ error: e.message, code: e.code });
+  }
 });
 
 // ── Google Sign-In: browser sends Google's ID token, we verify & issue ours ──
@@ -128,7 +167,15 @@ router.post('/me/daily-bonus', requireAuth, requireAccount, async (req, res) => 
 // Two balances, kept strictly apart: practice coins (free, never withdrawable)
 // and cash (real rupees, only from approved deposits).
 router.get('/wallet', requireAuth, requireAccount, async (req, res) => {
+  if (!config.cashEnabled) {
+    return res.json({
+      cashEnabled: false,
+      coins: await wallet.getBalance(req.user.id),
+      coinHistory: await wallet.historyFor(req.user.id, 50),
+    });
+  }
   res.json({
+    cashEnabled: true,
     coins: await wallet.getBalance(req.user.id),
     cashInr: (await cash.balances(req.user.id)).total,
     balances: await cash.balances(req.user.id), // { deposit, winnings, total, withdrawable }
@@ -146,7 +193,7 @@ router.get('/wallet', requireAuth, requireAccount, async (req, res) => {
 });
 
 // ── Deposits (add money) ──
-router.post('/wallet/deposit', requireAuth, requireAccount, authLimiter, async (req, res) => {
+router.post('/wallet/deposit', requireCash, requireAuth, requireAccount, authLimiter, async (req, res) => {
   try {
     res.json({ ok: true, claim: await cash.requestDeposit(req.user, req.body || {}) });
   } catch (e) {
@@ -155,7 +202,7 @@ router.post('/wallet/deposit', requireAuth, requireAccount, authLimiter, async (
 });
 
 // ── Withdrawals (cash out) ──
-router.post('/wallet/withdraw', requireAuth, requireAccount, authLimiter, async (req, res) => {
+router.post('/wallet/withdraw', requireCash, requireAuth, requireAccount, authLimiter, async (req, res) => {
   try {
     const w = await cash.requestWithdrawal(req.user, req.body || {});
     res.json({ ok: true, withdrawal: w, cashInr: await cash.balance(req.user.id) });
@@ -164,7 +211,7 @@ router.post('/wallet/withdraw', requireAuth, requireAccount, authLimiter, async 
   }
 });
 
-router.get('/wallet/withdrawals', requireAuth, requireAccount, async (req, res) => {
+router.get('/wallet/withdrawals', requireCash, requireAuth, requireAccount, async (req, res) => {
   res.json({ withdrawals: await store.listWithdrawals({ userId: req.user.id, limit: 20 }) });
 });
 
@@ -244,7 +291,7 @@ router.get('/tournaments/:id', requireAuth, requireAccount, async (req, res) => 
 
 // Submit proof of an off-app (UPI) payment. This does NOT grant entry — an
 // admin verifies the money actually arrived and then approves it.
-router.post('/tournaments/:id/claim', requireAuth, requireAccount, authLimiter, async (req, res) => {
+router.post('/tournaments/:id/claim', requireCash, requireAuth, requireAccount, authLimiter, async (req, res) => {
   try {
     if (config.push.requireForTournaments && !(await push.hasSubscription(req.user.id))) {
       return res.status(403).json({
@@ -261,7 +308,7 @@ router.post('/tournaments/:id/claim', requireAuth, requireAccount, authLimiter, 
 
 // How to pay for this tournament: your UPI id, a prefilled deep link, and the
 // player's own id so you can match the payment to the person.
-router.get('/tournaments/:id/payment', requireAuth, requireAccount, async (req, res) => {
+router.get('/tournaments/:id/payment', requireCash, requireAuth, requireAccount, async (req, res) => {
   try {
     const t = await tournaments.get(req.params.id);
     const ref = `${t.id}-${req.user.id}`.slice(0, 35);
@@ -297,10 +344,18 @@ router.post('/tournaments/:id/join', requireAuth, requireAccount, async (req, re
       });
     }
     const t = await tournaments.get(req.params.id);
+    if (t.entryType !== 'coins' && !config.cashEnabled) {
+      return res.status(400).json({ error: 'This tournament is not open', code: 'CASH_DISABLED' });
+    }
     const entry = t.entryType === 'balance'
       ? await tournaments.joinWithBalance(req.user, req.params.id)
       : await tournaments.joinWithCoins(req.user, req.params.id);
-    res.json({ ok: true, entry, coins: await wallet.getBalance(req.user.id), cashInr: await cash.balance(req.user.id) });
+    res.json({
+      ok: true,
+      entry,
+      coins: await wallet.getBalance(req.user.id),
+      ...(config.cashEnabled ? { cashInr: await cash.balance(req.user.id) } : {}),
+    });
   } catch (e) {
     res.status(400).json({ error: e.message, code: e.code });
   }

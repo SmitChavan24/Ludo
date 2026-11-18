@@ -11,29 +11,25 @@ const PIPS = {
 // A natural-looking die. Always shows something:
 //   • a tumbling face while `rolling`
 //   • the rolled value once settled
-//   • a "?" before the first roll (so it's never a blank white box)
-export default function Dice({ value, rolling = false, idle = false, onRoll, size = 64 }) {
-  const showPips = rolling || !!value;
+//   • a plain face before the first roll of the game
+// `color` rings the die in the colour of whoever rolled it.
+export default function Dice({ value, rolling = false, idle = false, onRoll, size = 64, color = null }) {
   const pips = PIPS[value || 1];
   const clickable = !!onRoll && !rolling;
 
   return (
     <div
-      className={`die ${rolling ? 'die-rolling' : ''} ${idle && !value ? 'die-idle' : ''} ${clickable ? 'die-clickable' : ''}`}
+      className={`die ${rolling ? 'die-rolling' : ''} ${idle && !value ? 'die-idle' : ''} ${clickable ? 'die-clickable' : ''} ${value && color && !clickable ? `die-by c-${color}` : ''}`}
       style={{ width: size, height: size }}
       onClick={clickable ? onRoll : undefined}
       role={clickable ? 'button' : undefined}
-      aria-label={value ? `Dice showing ${value}` : 'Dice — tap to roll'}
+      aria-label={clickable ? 'Dice: tap to roll' : value ? `Dice showing ${value}` : 'Dice'}
     >
-      {showPips ? (
-        <div className="pip-grid">
-          {Array.from({ length: 9 }).map((_, i) => (
-            <span key={i} className={`pip ${pips.includes(i) ? 'on' : ''}`} />
-          ))}
-        </div>
-      ) : (
-        <span className="die-q">?</span>
-      )}
+      <div className="pip-grid">
+        {Array.from({ length: 9 }).map((_, i) => (
+          <span key={i} className={`pip ${pips.includes(i) ? 'on' : ''}`} />
+        ))}
+      </div>
     </div>
   );
 }

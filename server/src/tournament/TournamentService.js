@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid';
 import { store } from '../db/store.js';
-import { wallet } from '../wallet/Wallet.js';
+import { wallet, HOUSE_ACCOUNT } from '../wallet/Wallet.js';
 import { normalizeUtr, isValidUtr } from '../util/payments.js';
 import { financials, validateSplit, validateRake, computePayouts, prizeAwards } from './economics.js';
 import { reasonText, scoreText } from './outcome.js';
@@ -121,14 +121,18 @@ export class TournamentService {
 
   // Live pot / your cut / prize breakdown. Derived from what has ACTUALLY been
   // paid, so the numbers can never overstate the prize.
+  // For a coin tournament the same maths runs in COINS (the *Inr field names
+  // are then coin amounts); `unit` tells callers which one they are reading.
   financialsFor(t, playerCount) {
-    return financials({
-      entryFeeInr: t.entryFeeInr,
+    const unit = t.entryType === 'coins' ? 'coins' : 'inr';
+    const money = financials({
+      entryFeeInr: unit === 'coins' ? t.entryFeeCoins : t.entryFeeInr,
       players: playerCount,
       maxPlayers: t.maxPlayers,
       rakeBips: t.rakeBips || 0,
       payoutSplit: t.payoutSplit?.length ? t.payoutSplit : [100],
     });
+    return { ...money, unit };
   }
 
   // Who is owed what, once a tournament has finished.
@@ -416,6 +420,22 @@ export class TournamentService {
     const winnerId = champion(bracket);
     if (winnerId && t.prizeCoins > 0) {
       await wallet.credit(winnerId, t.prizeCoins, 'tournament_prize', t.id);
+    }
+    // Coin tournaments pay their entry-fee pool out in coins, split by place.
+    if (t.entryType === 'coins' && t.entryFeeCoins > 0) {
+      const entries = await store.listTournamentEntries(t.id);
+      const money = this.financialsFor(t, entries.length);
+      let paid = 0;
+      for (const award of prizeAwards({ standings: standings(bracket), payouts: money.payouts })) {
+        if (award.amountInr > 0) {
+          await wallet.credit(award.userId, award.amountInr, 'tournament_prize', t.id);
+          paid += award.amountInr;
+        }
+      }
+      // Everything collected that was not paid out as prizes is the platform's
+      // cut; it goes to the house account so every entry coin is accounted for.
+      const cut = money.collectedInr - paid;
+      if (cut > 0) await wallet.credit(HOUSE_ACCOUNT, cut, 'tournament_rake', t.id);
     }
     // Cash tournaments settle straight into players' withdrawable balances, so
     // you never have to pay winners by hand.

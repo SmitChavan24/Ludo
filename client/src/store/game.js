@@ -13,6 +13,7 @@ export const useGame = create((set) => ({
   state: null, // engine.getState() snapshot
   commitment: null, // provably-fair commitment (serverSeedHash, clientSeed)
   lastRoll: null,
+  lastRoller: null, // who rolled lastRoll (the player on turn when it was rolled)
   lastEvent: null, // {type:'roll'|'move'|'skip', ...} — for animation/toasts
   result: null, // game:over / game:aborted payload
   turnTimeoutMs: 30000, // how long a player has to act before auto-skip
@@ -55,11 +56,15 @@ export const useGame = create((set) => ({
   },
 
   onGameStart({ room, state, commitment, turnTimeoutMs }) {
-    set({ room, state, commitment, turnTimeoutMs: turnTimeoutMs || 30000, status: 'playing', result: null, lastRoll: null, lastEvent: null });
+    set({ room, state, commitment, turnTimeoutMs: turnTimeoutMs || 30000, status: 'playing', result: null, lastRoll: null, lastRoller: null, lastEvent: null });
   },
 
   onRolled({ die, result, state, roomId }) {
-    set((s) => (stale(s, roomId) ? s : { state, lastRoll: die, lastEvent: { type: 'roll', die, result } }));
+    set((s) =>
+      stale(s, roomId)
+        ? s
+        : { state, lastRoll: die, lastRoller: s.state?.currentPlayerId ?? null, lastEvent: { type: 'roll', die, result } },
+    );
   },
 
   onMoved({ result, state, roomId }) {
@@ -93,6 +98,7 @@ export const useGame = create((set) => ({
       commitment: null,
       result: null,
       lastRoll: null,
+      lastRoller: null,
       lastEvent: null,
     });
   },

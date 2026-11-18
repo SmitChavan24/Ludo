@@ -15,6 +15,8 @@ export const useAppConfig = create((set) => ({
   pushRequiredForPractice: false,
   pushRequiredForTournaments: false,
   practiceBotWaitMs: 20000,
+  cashEnabled: false,
+  shopEnabled: false,
   loaded: false,
 
   async load() {
@@ -31,6 +33,8 @@ export const useAppConfig = create((set) => ({
         pushRequiredForPractice: !!c.pushRequiredForPractice,
         pushRequiredForTournaments: !!c.pushRequiredForTournaments,
         practiceBotWaitMs: c.practiceBotWaitMs ?? 20000,
+        cashEnabled: !!c.cashEnabled,
+        shopEnabled: !!c.shopEnabled,
         loaded: true,
       });
     } catch {

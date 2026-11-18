@@ -28,6 +28,13 @@ function sanitize(value, depth = 0) {
 export class AuditLog {
   constructor() {
     this.entries = [];
+    // Optional durable store ({ save(entry), list(limit) }), set at startup
+    // when MySQL is in use, so the trail survives restarts.
+    this.persist = null;
+  }
+
+  usePersistence(persist) {
+    this.persist = persist;
   }
 
   record({ actor = 'unknown', action, detail = null, req = null }) {
@@ -41,10 +48,12 @@ export class AuditLog {
     this.entries.push(entry);
     if (this.entries.length > MAX_IN_MEMORY) this.entries.shift();
     console.log(`[audit] ${entry.actor} ${entry.action} from ${entry.ip}`);
+    this.persist?.save(entry).catch((err) => console.error('[audit] could not save entry:', err.message));
     return entry;
   }
 
-  list(limit = 100) {
+  async list(limit = 100) {
+    if (this.persist) return this.persist.list(limit);
     return this.entries.slice(-limit).reverse();
   }
 }

@@ -13,13 +13,22 @@ export function setWalletBackend(impl) {
 
 export { WalletError };
 
+// The house account: platform fees from matches and tournaments collect here.
+export const HOUSE_ACCOUNT = '__house__';
+
 export const wallet = {
   getBalance: (...a) => backend.getBalance(...a),
   houseBalance: (...a) => backend.houseBalance(...a),
   historyFor: (...a) => backend.historyFor(...a),
   credit: (...a) => backend.credit(...a),
+  creditOnce: (...a) => backend.creditOnce(...a),
   debit: (...a) => backend.debit(...a),
   escrowStakes: (...a) => backend.escrowStakes(...a),
   settlePot: (...a) => backend.settlePot(...a),
   refundStakes: (...a) => backend.refundStakes(...a),
+  // Accounting reports (read-only).
+  ledgerSummary: (...a) => backend.ledgerSummary(...a),
+  ledgerDaily: (...a) => backend.ledgerDaily(...a),
+  listLedger: (...a) => backend.listLedger(...a),
+  balanceTotals: (...a) => backend.balanceTotals(...a),
 };

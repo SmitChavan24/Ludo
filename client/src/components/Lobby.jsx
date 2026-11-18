@@ -9,6 +9,8 @@ import StatsModal from './StatsModal.jsx';
 import FairnessInfo from './FairnessInfo.jsx';
 import PushToggle from './PushToggle.jsx';
 import WalletModal from './WalletModal.jsx';
+import CoinShopModal from './CoinShopModal.jsx';
+import { takeReturnedCoinOrder } from '../util/coinOrder.js';
 import { usePushStatus } from '../hooks/usePushStatus.js';
 import Tournaments from './Tournaments.jsx';
 import TournamentModal from './TournamentModal.jsx';
@@ -20,7 +22,7 @@ export default function Lobby() {
   const claimDailyBonus = useAuth((s) => s.claimDailyBonus);
   const setError = useGame((s) => s.setError);
   const presence = useGame((s) => s.presence);
-  const { stakes, playerCounts, rakeBips, referralBonus } = useAppConfig();
+  const { stakes, playerCounts, rakeBips, referralBonus, dailyBonus, cashEnabled } = useAppConfig();
 
   const [players, setPlayers] = useState(playerCounts[0] ?? 2);
   const [stake, setStake] = useState(stakes[0] ?? 50);
@@ -36,6 +38,9 @@ export default function Lobby() {
   const pushStatus = usePushStatus();
   const [openTournament, setOpenTournament] = useState(null);
   const [cashInr, setCashInr] = useState(null);
+  // Back from paying on pay.billtrack.me → open the shop to confirm the order.
+  const [returnedOrder] = useState(() => takeReturnedCoinOrder());
+  const [showShop, setShowShop] = useState(!!returnedOrder);
 
   // Keep selections inside whatever the server currently allows.
   useEffect(() => {
@@ -47,10 +52,11 @@ export default function Lobby() {
     apiFetch('/me/referral', { token: accessToken })
       .then(setReferral)
       .catch(() => {});
+    if (!cashEnabled) return;
     apiFetch('/wallet', { token: accessToken })
       .then((wl) => setCashInr(wl.cashInr))
       .catch(() => {});
-  }, [accessToken, showWallet]);
+  }, [accessToken, showWallet, cashEnabled]);
 
   const run = (fn) => async () => {
     setBusy(true);
@@ -102,11 +108,19 @@ export default function Lobby() {
     <div className="lobby">
       <header className="topbar">
         <div className="brand-sm">🎲 CoinLudo</div>
-        <button className="wallet-chip wallet-open" onClick={() => setShowWallet(true)} title="Open wallet">
-          <span className="chip-cash">₹{Number(cashInr ?? 0).toLocaleString('en-IN')}</span>
-          <span className="chip-sep" />
-          <span className="chip-coins">🪙 {user.coins.toLocaleString('en-IN')}</span>
-        </button>
+        {cashEnabled ? (
+          <button className="wallet-chip wallet-open" onClick={() => setShowWallet(true)} title="Open wallet">
+            <span className="chip-cash">₹{Number(cashInr ?? 0).toLocaleString('en-IN')}</span>
+            <span className="chip-sep" />
+            <span className="chip-coins">🪙 {user.coins.toLocaleString('en-IN')}</span>
+          </button>
+        ) : (
+          <button className="wallet-chip wallet-open" onClick={() => setShowShop(true)} title="Buy coins">
+            <span className="chip-coins">🪙 {user.coins.toLocaleString('en-IN')}</span>
+            <span className="chip-sep" />
+            <span className="chip-cash">＋ Buy</span>
+          </button>
+        )}
       </header>
 
       <section className="profile-row">
@@ -122,9 +136,11 @@ export default function Lobby() {
         <button className="btn btn-ghost btn-sm" onClick={logout}>Logout</button>
       </section>
 
-      <button className="bonus-btn" onClick={onBonus}>
-        🎁 Claim daily bonus {bonusMsg && <span className="bonus-flash">{bonusMsg}</span>}
-      </button>
+      {dailyBonus > 0 && (
+        <button className="bonus-btn" onClick={onBonus}>
+          🎁 Claim daily bonus {bonusMsg && <span className="bonus-flash">{bonusMsg}</span>}
+        </button>
+      )}
 
       <div className="stats-row">
         <button className="stat-btn" onClick={() => setStatsTab('leaderboard')}>🏆 Leaderboard</button>
@@ -189,10 +205,19 @@ export default function Lobby() {
 
       {/* ── Invite friends (referral) ── */}
       <section className="card invite-card">
-        <h2>Invite friends, both get coins</h2>
-        <p className="card-sub">
-          You and your friend each get 🪙 {referral?.bonusPerInvite ?? referralBonus} when they join with your link.
-        </p>
+        {(referral?.bonusPerInvite ?? referralBonus) > 0 ? (
+          <>
+            <h2>Invite friends, both get coins</h2>
+            <p className="card-sub">
+              You and your friend each get 🪙 {referral?.bonusPerInvite ?? referralBonus} when they join with your link.
+            </p>
+          </>
+        ) : (
+          <>
+            <h2>Invite friends</h2>
+            <p className="card-sub">Share your link and play Ludo together.</p>
+          </>
+        )}
         <button className="btn btn-whatsapp btn-block" onClick={onShareInvite}>
           Share invite link
         </button>
@@ -202,7 +227,7 @@ export default function Lobby() {
             <span className="id-copy">{copied === 'invite' ? 'Copied ✓' : '📋 Copy link'}</span>
           </button>
         )}
-        {referral?.invited > 0 && (
+        {referral?.invited > 0 && referral?.earned > 0 && (
           <p className="invite-stat">
             🎉 {referral.invited} joined · earned 🪙 {referral.earned.toLocaleString('en-IN')}
           </p>
@@ -245,6 +270,10 @@ export default function Lobby() {
       </button>
 
       <footer className="lobby-foot">
+        <nav className="legal-links">
+          <a href="/terms">Terms</a>
+          <a href="/privacy">Privacy</a>
+        </nav>
         <button className="foot-link" onClick={() => setShowFairness(true)}>
           Server-verified moves · Provably-fair dice 🔒 <span className="foot-more">How it works</span>
         </button>
@@ -253,11 +282,12 @@ export default function Lobby() {
       {statsTab && <StatsModal initialTab={statsTab} onClose={() => setStatsTab(null)} />}
       {showFairness && <FairnessInfo onClose={() => setShowFairness(false)} />}
       {showWallet && <WalletModal onClose={() => setShowWallet(false)} />}
+      {showShop && <CoinShopModal returnedOrderId={returnedOrder} onClose={() => setShowShop(false)} />}
       {openTournament && (
         <TournamentModal
           id={openTournament}
           onClose={() => setOpenTournament(null)}
-          onNeedWallet={() => { setOpenTournament(null); setShowWallet(true); }}
+          onNeedWallet={() => { setOpenTournament(null); cashEnabled ? setShowWallet(true) : setShowShop(true); }}
         />
       )}
     </div>

@@ -12,6 +12,25 @@ const show = (el, on = true) => el && el.classList.toggle('hidden', !on);
 const getToken = () => sessionStorage.getItem(TOKEN_KEY);
 const setToken = (t) => (t ? sessionStorage.setItem(TOKEN_KEY, t) : sessionStorage.removeItem(TOKEN_KEY));
 const rupees = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
+const coinsFmt = (n) => `🪙 ${Number(n || 0).toLocaleString('en-IN')}`;
+// Real-money features on? Read from /stats; when off, only coin tournaments exist.
+let cashOn = true;
+const feeOf = (t) => (t.entryType === 'coins' ? coinsFmt(t.entryFeeCoins) : rupees(t.entryFeeInr));
+
+function applyCashMode() {
+  if (cashOn) return;
+  for (const tab of ['payments', 'withdrawals']) {
+    show(document.querySelector(`.tab[data-tab="${tab}"]`), false);
+  }
+  const sel = $('t-entry');
+  if (sel && sel.options.length > 1) {
+    sel.replaceChildren(new Option('Coins', 'coins', true, true));
+    $('t-fee-label').textContent = 'Entry fee (coins)';
+    $('t-title').placeholder = 'Sunday 500-coin Cup';
+    $('t-fee').value = 500;
+    updatePreview();
+  }
+}
 const when = (ms) => (ms ? new Date(ms).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—');
 
 async function api(path, { method = 'GET', body } = {}) {
@@ -100,8 +119,18 @@ $('logout').addEventListener('click', () => {
 // ── Overview ──
 async function loadOverview() {
   const { totals, tournaments } = await api('/stats');
+  cashOn = totals.cashEnabled !== false;
+  applyCashMode();
   const kpis = $('kpis');
-  kpis.replaceChildren(
+  if (!cashOn) {
+    kpis.replaceChildren(
+      kpi('Coin sales', rupees(totals.coinSales?.revenueInr), 'good'),
+      kpi('Orders', totals.coinSales?.orders ?? 0),
+      kpi('Coins sold', coinsFmt(totals.coinSales?.coinsSold)),
+      kpi('Tournament entries', totals.entries),
+      kpi('Coins taken as fees', coinsFmt(totals.yourCutCoins)),
+    );
+  } else kpis.replaceChildren(
     kpi('Your revenue', rupees(totals.yourCutInr), 'good'),
     kpi('Collected', rupees(totals.collectedInr)),
     kpi('Prize pool', rupees(totals.prizePoolInr)),
@@ -116,8 +145,8 @@ async function loadOverview() {
       const row = el('div', 'row-item');
       const main = el('div', 'row-main');
       main.append(el('div', 'row-title', t.title), el('div', 'row-sub',
-        `${t.status} · ${t.players}/${t.maxPlayers} players · ${rupees(t.entryFeeInr)} entry · ${when(t.startsAt)}`));
-      row.append(main, el('div', 'row-amount', rupees(t.yourCutInr)));
+        `${t.status} · ${t.players}/${t.maxPlayers} players · ${feeOf(t)} entry · ${when(t.startsAt)}`));
+      row.append(main, el('div', 'row-amount', t.unit === 'coins' ? coinsFmt(t.yourCutInr) : rupees(t.yourCutInr)));
       return row;
     }),
   );
@@ -142,11 +171,12 @@ function updatePreview() {
   const parts = splitValues();
   const amounts = parts.map((p) => Math.floor((pool * p) / 100));
   amounts[0] += pool - amounts.reduce((a, b) => a + b, 0);
+  const f = $('t-entry')?.value === 'coins' ? coinsFmt : rupees;
   $('t-preview').textContent = fee
-    ? `If it fills: collect ${rupees(gross)} · you keep ${rupees(cut)} · prizes ${amounts.map(rupees).join(' / ')}`
+    ? `If it fills: collect ${f(gross)} · you keep ${f(cut)} · prizes ${amounts.map(f).join(' / ')}`
     : 'Free tournament — no entry fee.';
 }
-['t-fee', 't-rake', 't-size', 't-split'].forEach((id) => $(id)?.addEventListener('input', updatePreview));
+['t-fee', 't-rake', 't-size', 't-split', 't-entry'].forEach((id) => $(id)?.addEventListener('input', updatePreview));
 
 $('t-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -156,7 +186,7 @@ $('t-form')?.addEventListener('submit', async (e) => {
     const body = {
       title: $('t-title').value,
       entryType: $('t-entry').value,
-      entryFeeInr: Number($('t-fee').value) || 0,
+      entryFeeInr: $('t-entry').value === 'coins' ? 0 : Number($('t-fee').value) || 0,
       entryFeeCoins: $('t-entry').value === 'coins' ? Number($('t-fee').value) || 0 : 0,
       rakeBips: Math.round((Number($('t-rake').value) || 0) * 100),
       payoutSplit: splitValues(),
@@ -184,7 +214,7 @@ async function loadTournaments() {
       const main = el('div', 'row-main');
       main.append(
         el('div', 'row-title', t.title),
-        el('div', 'row-sub', `${t.status} · ${rupees(t.entryFeeInr)} · ${t.maxPlayers}p · ${when(t.startsAt)}`),
+        el('div', 'row-sub', `${t.status} · ${feeOf(t)} · ${t.maxPlayers}p · ${when(t.startsAt)}`),
       );
       const actions = el('div', 'row-actions');
       actions.append(button('Open', 'small', () => openTournament(t.id).catch((e) => msg(e.message, true))));
@@ -529,7 +559,8 @@ $('notify-form')?.addEventListener('submit', async (e) => {
 // ── Boot ──
 async function refreshAll() {
   if (!getToken()) return;
-  await Promise.allSettled([loadOverview(), loadTournaments(), loadPayments(), loadWithdrawals(), refreshReach()]);
+  await loadOverview().catch(() => {});
+  await Promise.allSettled([loadTournaments(), refreshReach(), ...(cashOn ? [loadPayments(), loadWithdrawals()] : [])]);
   if (currentTournamentId) {
     openTournament(currentTournamentId).catch(() => {});
   }

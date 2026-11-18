@@ -66,11 +66,74 @@ function noise(start, dur, gain = 0.1) {
   src.start(t0);
 }
 
+// A short band-passed noise burst: sounds like a die hitting wood/plastic.
+function click(start, gain = 0.25, freq = 2200) {
+  const ac = getCtx();
+  if (!ac) return;
+  const t0 = ac.currentTime + start;
+  const dur = 0.035;
+  const buffer = ac.createBuffer(1, Math.floor(ac.sampleRate * dur), ac.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 3);
+  const src = ac.createBufferSource();
+  src.buffer = buffer;
+  const bp = ac.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.setValueAtTime(freq, t0);
+  bp.Q.setValueAtTime(1.2, t0);
+  const g = ac.createGain();
+  g.gain.setValueAtTime(gain, t0);
+  src.connect(bp).connect(g).connect(ac.destination);
+  src.start(t0);
+}
+
+// Vibrate if the device supports it (Android; iPhones don't allow it).
+export function buzz(pattern) {
+  try {
+    navigator.vibrate?.(pattern);
+  } catch {
+    /* not supported */
+  }
+}
+
+const NUMBER_WORDS = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six'];
+// Say the rolled number out loud, briefly.
+function say(text) {
+  try {
+    const synth = window.speechSynthesis;
+    if (!synth) return;
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'en-IN';
+    u.rate = 1.15;
+    u.volume = 0.9;
+    synth.speak(u);
+  } catch {
+    /* speech not available */
+  }
+}
+
 export const sfx = {
-  roll() {
+  // Tap: the die rattling in a cup while the server rolls.
+  shake() {
+    buzz([25, 35, 25, 35, 25, 35, 25]);
     if (muted) return;
-    noise(0, 0.18, 0.08);
-    tone(200, 0.04, 0.12, 'square', 0.05);
+    [0, 0.07, 0.13, 0.2, 0.26, 0.33, 0.4].forEach((t, i) => click(t, 0.18 + (i % 2) * 0.06, 1800 + (i % 3) * 600));
+  },
+  // The die lands (everyone hears this, for every roll): thud, bounce, and
+  // the number spoken. A six gets an extra chime.
+  land(value) {
+    buzz(value === 6 ? [90, 70, 160] : [90]);
+    if (muted) return;
+    tone(110, 0, 0.12, 'sine', 0.22);
+    click(0, 0.32, 1400);
+    click(0.09, 0.16, 2400);
+    if (value === 6) [784, 1047].forEach((f, i) => tone(f, 0.12 + i * 0.1, 0.16, 'sine', 0.1));
+    if (value) say(`${NUMBER_WORDS[value]}${value === 6 ? '!' : ''}`);
+  },
+  // Kept for compatibility: a full roll = shake + land.
+  roll(value) {
+    sfx.land(value);
   },
   move() {
     if (muted) return;

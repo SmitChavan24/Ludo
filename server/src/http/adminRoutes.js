@@ -11,6 +11,7 @@ import { store } from '../db/store.js';
 import { tournaments } from '../tournament/TournamentService.js';
 import { push } from '../push/PushService.js';
 import { cash } from '../cash/CashService.js';
+import * as accounts from '../accounts/Accounts.js';
 
 // ──────────────────────────────────────────────────────────────────────────
 // Admin / CRM endpoints. All credit by EXACT user id (no fuzzy search) so a
@@ -129,6 +130,9 @@ adminRouter.get('/tournaments', async (req, res) => {
 
 adminRouter.post('/tournaments', async (req, res) => {
   try {
+    if (!config.cashEnabled && (req.body?.entryType || 'manual') !== 'coins') {
+      return res.status(400).json({ error: 'Only coin tournaments are available', code: 'CASH_DISABLED' });
+    }
     res.json({ ok: true, tournament: await tournaments.create(req.body || {}) });
   } catch (e) {
     fail(res, e);
@@ -257,6 +261,16 @@ adminRouter.post('/claims/:id/reject', async (req, res) => {
 // ── Business overview ──
 // Everything is derived from what has actually been collected — no projections
 // dressed up as revenue.
+// Real rupees taken through the coin shop (credited orders only).
+async function coinSales() {
+  const orders = await store.listCoinOrders({ status: 'credited', limit: 500 });
+  return {
+    orders: orders.length,
+    revenueInr: orders.reduce((a, o) => a + o.amountInr, 0),
+    coinsSold: orders.reduce((a, o) => a + o.coins, 0),
+  };
+}
+
 adminRouter.get('/stats', async (req, res) => {
   const all = await tournaments.list({ limit: 200 });
   const claims = await tournaments.listClaims({ status: 'pending', limit: 200 });
@@ -265,6 +279,8 @@ adminRouter.get('/stats', async (req, res) => {
   let yourCut = 0;
   let prizes = 0;
   let entries = 0;
+  let collectedCoins = 0;
+  let cutCoins = 0;
   const byStatus = { open: 0, running: 0, finished: 0, cancelled: 0 };
 
   const rows = [];
@@ -274,7 +290,10 @@ adminRouter.get('/stats', async (req, res) => {
     const money = tournaments.financialsFor(t, list.length);
     entries += list.length;
     // Cancelled events collected nothing in the end — exclude them from revenue.
-    if (t.status !== 'cancelled') {
+    if (t.status !== 'cancelled' && money.unit === 'coins') {
+      collectedCoins += money.collectedInr;
+      cutCoins += money.yourCutInr;
+    } else if (t.status !== 'cancelled') {
       collected += money.collectedInr;
       yourCut += money.yourCutInr;
       prizes += money.prizePoolInr;
@@ -288,6 +307,8 @@ adminRouter.get('/stats', async (req, res) => {
       players: list.length,
       maxPlayers: t.maxPlayers,
       entryFeeInr: t.entryFeeInr,
+      entryFeeCoins: t.entryFeeCoins,
+      unit: money.unit,
       rakeBips: t.rakeBips,
       collectedInr: money.collectedInr,
       yourCutInr: money.yourCutInr,
@@ -306,6 +327,10 @@ adminRouter.get('/stats', async (req, res) => {
       prizePoolInr: prizes,       // owed to / paid to players
       pendingClaims: claims.length,
       houseCoins: await wallet.houseBalance(),
+      collectedCoins,
+      yourCutCoins: cutCoins,
+      coinSales: await coinSales(),
+      cashEnabled: config.cashEnabled,
     },
     tournaments: rows,
     pendingClaims: claims,
@@ -417,6 +442,31 @@ adminRouter.post('/withdrawals/:id/reject', async (req, res) => {
 });
 
 // Recent admin activity — who did what, from where.
-adminRouter.get('/audit', (req, res) => {
-  res.json({ entries: audit.list(parseInt(req.query.limit, 10) || 100) });
+// ── Accounts: the books ──
+// ?from=YYYY-MM-DD&to=YYYY-MM-DD (India dates, inclusive). Omit for all time.
+adminRouter.get('/accounts/summary', async (req, res) => {
+  const range = accounts.parseRange(req.query);
+  const [summary, reconciliation] = await Promise.all([accounts.summary(range), accounts.reconciliation()]);
+  res.json({ ...summary, reconciliation });
+});
+
+adminRouter.get('/accounts/ledger', async (req, res) => {
+  const range = accounts.parseRange(req.query);
+  res.json(
+    await accounts.ledgerPage(range, {
+      account: req.query.account,
+      reason: req.query.reason,
+      limit: parseInt(req.query.limit, 10) || 100,
+      offset: parseInt(req.query.offset, 10) || 0,
+    }),
+  );
+});
+
+adminRouter.get('/accounts/orders', async (req, res) => {
+  const range = accounts.parseRange(req.query);
+  res.json({ orders: await accounts.ordersPage(range, { status: req.query.status, limit: parseInt(req.query.limit, 10) || 500 }) });
+});
+
+adminRouter.get('/audit', async (req, res) => {
+  res.json({ entries: await audit.list(parseInt(req.query.limit, 10) || 100) });
 });

@@ -45,7 +45,7 @@ export default function Tournaments({ onOpen }) {
   if (loading) {
     return (
       <section className="card tourney-card" aria-busy="true">
-        <div className="hero-head"><h2>🏆 Cash tournaments</h2></div>
+        <div className="hero-head"><h2>🏆 Tournaments</h2></div>
         <div className="sk-row" />
         <div className="sk-row short" />
       </section>
@@ -56,7 +56,7 @@ export default function Tournaments({ onOpen }) {
   return (
     <section className="card tourney-card">
       <div className="hero-head">
-        <h2>🏆 Cash tournaments</h2>
+        <h2>🏆 Tournaments</h2>
       </div>
       <p className="card-sub">Pay an entry fee, win a share of the pot. Starts at a fixed time.</p>
       <div className="tourney-list">
@@ -76,26 +76,30 @@ const poolFor = (entryFeeInr, players, rakeBips) => {
 
 function TournamentRow({ t, onOpen }) {
   const countdown = useCountdown(t.startsAt);
+  // Coin tournaments run the same maths in coins.
+  const isCoins = t.entryType === 'coins';
+  const fee = isCoins ? t.entryFeeCoins : t.entryFeeInr;
+  const fmt = (n) => (isCoins ? `🪙 ${Number(n || 0).toLocaleString('en-IN')}` : rupees(n));
   // The pot is built from entry fees, so it grows as players join. Lead with
   // what is actually in it and show the full-table figure as the ceiling —
   // quoting only the "if full" number promises money nobody has paid in yet.
   const joined = t.players || 0;
-  const pool = poolFor(t.entryFeeInr, joined, t.rakeBips);
-  const poolIfFull = poolFor(t.entryFeeInr, t.maxPlayers, t.rakeBips);
+  const pool = poolFor(fee, joined, t.rakeBips);
+  const poolIfFull = poolFor(fee, t.maxPlayers, t.rakeBips);
 
   return (
     <button className="tourney-row" onClick={onOpen}>
       <div className="tourney-main">
         <div className="tourney-title">{t.title}</div>
         <div className="tourney-sub">
-          {t.entryFeeInr ? `${rupees(t.entryFeeInr)} entry` : 'Free entry'} · {joined}/{t.maxPlayers} joined · {countdown}
+          {fee ? `${fmt(fee)} entry` : 'Free entry'} · {joined}/{t.maxPlayers} joined · {countdown}
           {t.status === 'lobby' && <span className="tourney-live"> · lobby open</span>}
         </div>
       </div>
       <div className="tourney-prize">
-        <div className="tourney-prize-value">{rupees(pool)}</div>
+        <div className="tourney-prize-value">{fmt(pool)}</div>
         <div className="tourney-prize-label">prize pool</div>
-        {poolIfFull > pool && <div className="tourney-prize-max">up to {rupees(poolIfFull)}</div>}
+        {poolIfFull > pool && <div className="tourney-prize-max">up to {fmt(poolIfFull)}</div>}
       </div>
     </button>
   );

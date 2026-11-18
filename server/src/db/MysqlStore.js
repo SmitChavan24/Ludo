@@ -542,4 +542,64 @@ export class MysqlStore {
   async setDailyBonusClaimed(userId, timestamp) {
     await this.pool.execute('UPDATE users SET last_daily_bonus_at=? WHERE id=?', [timestamp, userId]);
   }
+
+  // ── coin shop orders ──
+  async createCoinOrder(o) {
+    await this.pool.execute(
+      `INSERT INTO coin_orders(id,user_id,pack_id,coins,amount_inr,pay_payment_id,checkout_url,status,created_at,updated_at)
+       VALUES(?,?,?,?,?,?,?,?,?,?)`,
+      [o.id, o.userId, o.packId, o.coins, o.amountInr, o.payPaymentId || null, o.checkoutUrl || null, o.status, o.createdAt, o.updatedAt],
+    );
+    return this.getCoinOrder(o.id);
+  }
+
+  async getCoinOrder(id) {
+    const [rows] = await this.pool.execute('SELECT * FROM coin_orders WHERE id=?', [id]);
+    return mapCoinOrder(rows[0]);
+  }
+
+  async updateCoinOrder(id, patch) {
+    const cols = { payPaymentId: 'pay_payment_id', checkoutUrl: 'checkout_url', status: 'status' };
+    const sets = [];
+    const params = [];
+    for (const [k, col] of Object.entries(cols)) {
+      if (k in patch) { sets.push(`${col}=?`); params.push(patch[k]); }
+    }
+    sets.push('updated_at=?');
+    params.push(Date.now(), id);
+    await this.pool.execute(`UPDATE coin_orders SET ${sets.join(',')} WHERE id=?`, params);
+    return this.getCoinOrder(id);
+  }
+
+  async listCoinOrders({ status = null, userId = null, since = null, until = null, limit = 50 } = {}) {
+    const lim = Math.max(1, Math.min(10000, parseInt(limit, 10) || 50));
+    const where = [];
+    const params = [];
+    if (status) { where.push('status=?'); params.push(status); }
+    if (userId) { where.push('user_id=?'); params.push(userId); }
+    if (since) { where.push('created_at>=?'); params.push(since); }
+    if (until) { where.push('created_at<?'); params.push(until); }
+    const [rows] = await this.pool.query(
+      `SELECT * FROM coin_orders ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+       ORDER BY created_at DESC LIMIT ${lim}`,
+      params,
+    );
+    return rows.map(mapCoinOrder);
+  }
+}
+
+function mapCoinOrder(r) {
+  if (!r) return null;
+  return {
+    id: r.id,
+    userId: r.user_id,
+    packId: r.pack_id,
+    coins: Number(r.coins),
+    amountInr: Number(r.amount_inr),
+    payPaymentId: r.pay_payment_id,
+    checkoutUrl: r.checkout_url,
+    status: r.status,
+    createdAt: Number(r.created_at),
+    updatedAt: Number(r.updated_at),
+  };
 }

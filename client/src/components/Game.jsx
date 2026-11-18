@@ -13,6 +13,7 @@ export default function Game() {
   const setError = useGame((s) => s.setError);
   const reset = useGame((s) => s.reset);
   const lastRoll = useGame((s) => s.lastRoll);
+  const lastRoller = useGame((s) => s.lastRoller);
   const lastEvent = useGame((s) => s.lastEvent);
   const turnTimeoutMs = useGame((s) => s.turnTimeoutMs);
   const [copied, setCopied] = useState(false);
@@ -23,6 +24,10 @@ export default function Game() {
   const [muted, setMuted] = useState(isMuted());
   const [turnFrac, setTurnFrac] = useState(1);
   const turnStartRef = useRef(Date.now());
+  const rollingRef = useRef(false);
+  // Players the server is waiting for (game paused), with a local countdown.
+  const paused = room?.status === 'playing' && room?.paused?.length ? room.paused : null;
+  const [pauseLeft, setPauseLeft] = useState({});
 
   const myId = user.id;
   // The server ranks the table after every move; the client only renders it.
@@ -31,6 +36,10 @@ export default function Game() {
   const isPractice = !!room?.isPractice;
   // Practice is anonymous: never show a name, just who's who.
   const label = (p) => (isPractice ? (p.id === myId ? 'You' : 'Computer') : `${p.name}${p.id === myId ? ' (you)' : ''}`);
+
+  useEffect(() => {
+    rollingRef.current = rolling;
+  }, [rolling]);
 
   // While "rolling", flick through random faces so the die tumbles naturally.
   useEffect(() => {
@@ -54,18 +63,56 @@ export default function Game() {
     return () => clearInterval(iv);
   }, [room?.id, room?.botJoinsInMs, room?.isPractice, status]);
 
-  // Turn countdown: reset on every state change, tick toward the auto-skip.
+  // Turn countdown: reset on every state change (and when a pause ends, since
+  // the server gives the player a fresh clock), tick toward the auto-skip.
+  // While the game is paused the clock is frozen, so the bar stops too.
   useEffect(() => {
     turnStartRef.current = Date.now();
     setTurnFrac(1);
-  }, [state?.version]);
+  }, [state?.version, !!paused]);
   useEffect(() => {
-    if (!state || state.status === 'finished') return;
+    if (!state || state.status === 'finished' || paused) return;
     const iv = setInterval(() => {
       setTurnFrac(Math.max(0, 1 - (Date.now() - turnStartRef.current) / turnTimeoutMs));
     }, 100);
     return () => clearInterval(iv);
-  }, [state?.status, turnTimeoutMs]);
+  }, [state?.status, turnTimeoutMs, !!paused]);
+
+  // Paused: count down each missing player's reconnect window. The server
+  // sends REMAINING ms, anchored here to the local clock (skew-proof).
+  useEffect(() => {
+    if (!paused) return setPauseLeft({});
+    const deadlines = Object.fromEntries(paused.map((p) => [p.userId, Date.now() + p.msLeft]));
+    const tick = () =>
+      setPauseLeft(Object.fromEntries(Object.entries(deadlines).map(([id, d]) => [id, Math.max(0, Math.ceil((d - Date.now()) / 1000))])));
+    tick();
+    const iv = setInterval(tick, 250);
+    return () => clearInterval(iv);
+  }, [paused && paused.map((p) => `${p.userId}:${p.msLeft}`).join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // It's my turn: make it impossible to miss. Buzz the phone, and if this tab
+  // is in the background, flash the tab title until the player comes back.
+  const myTurnNow = !!state && state.status !== 'finished' && !paused && state.currentPlayerId === myId;
+  useEffect(() => {
+    if (!myTurnNow) return;
+    try { navigator.vibrate?.([120, 60, 120]); } catch { /* not supported */ }
+    if (!document.hidden) return;
+    const original = document.title;
+    let on = false;
+    const iv = setInterval(() => {
+      on = !on;
+      document.title = on ? '🎲 Your turn!' : original;
+    }, 900);
+    const stop = () => {
+      clearInterval(iv);
+      document.title = original;
+    };
+    document.addEventListener('visibilitychange', stop, { once: true });
+    return () => {
+      document.removeEventListener('visibilitychange', stop);
+      stop();
+    };
+  }, [myTurnNow, state?.currentPlayerId]);
 
   // Auto-move when there is exactly one legal option (Ludo convention).
   useEffect(() => {
@@ -78,7 +125,11 @@ export default function Game() {
   // Sound effects, driven by the latest broadcast event.
   useEffect(() => {
     if (!lastEvent) return;
-    if (lastEvent.type === 'roll') sfx.roll();
+    if (lastEvent.type === 'roll') {
+      // The roller's die is still tumbling on screen; land the sound with it.
+      const t = setTimeout(() => sfx.land(lastEvent.die), rollingRef.current ? 450 : 0);
+      return () => clearTimeout(t);
+    }
     else if (lastEvent.type === 'move') {
       const r = lastEvent.result;
       if (r?.captured?.length) sfx.capture();
@@ -213,15 +264,24 @@ export default function Game() {
 
   // ── Active / finished game ──
   const isMyTurn = state.currentPlayerId === myId;
-  const canRoll = isMyTurn && state.phase === 'awaitingRoll';
-  const mustMove = isMyTurn && state.phase === 'awaitingMove';
+  const canRoll = isMyTurn && state.phase === 'awaitingRoll' && !paused;
+  const mustMove = isMyTurn && state.phase === 'awaitingMove' && !paused;
   const currentPlayer = state.players.find((p) => p.id === state.currentPlayerId);
+  const secondsLeft = Math.max(0, Math.ceil((turnFrac * turnTimeoutMs) / 1000));
+  const lowTime = !paused && secondsLeft <= 10;
+  const mmss = (sec) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+  const nameOf = (p) => (isPractice ? (p?.id === myId ? 'You' : 'Computer') : p?.name?.split(' ')[0] || 'Player');
   // The die tumbles while rolling. On your own turn-to-roll it shows a neutral
   // "?" (not a stale/opponent value); otherwise it shows the latest roll.
-  const dieValue = rolling ? rollFace : state.lastDie ?? (isMyTurn ? null : lastRoll);
+  // Everyone always sees the most recent roll, whoever made it, even when it
+  // had no legal move and the turn passed straight on.
+  const dieValue = rolling ? rollFace : state.lastDie ?? lastRoll;
+  const roller = rolling ? currentPlayer : state.players.find((p) => p.id === (state.lastDie ? state.currentPlayerId : lastRoller));
+  const rollCaption = !rolling && dieValue && roller ? `${roller.id === myId ? 'You' : nameOf(roller)} rolled ${dieValue}` : null;
 
   const onRoll = async () => {
     if (rolling) return;
+    sfx.shake(); // instant feedback on tap: rattle sound + rattling buzz
     setRolling(true);
     try {
       await gameApi.roll();
@@ -260,7 +320,7 @@ export default function Game() {
 
       <div className="players-bar">
         {state.players.map((p) => (
-          <div key={p.id} className={`player-chip ${p.id === state.currentPlayerId ? 'turn' : ''}`}>
+          <div key={p.id} className={`player-chip c-${p.color} ${p.id === state.currentPlayerId && !paused ? 'turn' : ''} ${p.id === myId ? 'me' : ''}`}>
             <span className={`dot c-${p.color}`} />
             <div className="pc-meta">
               <div className="pc-name">
@@ -278,6 +338,8 @@ export default function Game() {
                 </div>
               )}
             </div>
+            {paused?.some((x) => x.userId === p.id) && <span className="pc-away">offline</span>}
+            {p.id === state.currentPlayerId && !paused && <span className="pc-turn">{p.id === myId ? 'YOU' : 'TURN'}</span>}
             {p.id === state.currentPlayerId && state.lastDie && <span className="pc-die">{state.lastDie}</span>}
             {p.id === state.currentPlayerId && (
               <div className="turn-timer">
@@ -288,7 +350,45 @@ export default function Game() {
         ))}
       </div>
 
-      <LudoBoard state={state} myId={myId} onMove={onMove} />
+      {state.status !== 'finished' && (
+        <div
+          className={`turn-banner c-${paused ? 'none' : currentPlayer?.color} ${paused ? 'paused' : isMyTurn ? 'mine' : 'theirs'} ${lowTime && isMyTurn ? 'low' : ''}`}
+          role="status"
+          aria-live="polite"
+        >
+          {paused ? (
+            <>
+              <span className="tb-icon">⏸</span>
+              <span className="tb-text">
+                <b>Game paused</b>
+                <small>
+                  Waiting for {paused.map((p) => `${p.name.split(' ')[0]} (${mmss(pauseLeft[p.userId] ?? Math.ceil(p.msLeft / 1000))})`).join(', ')} to reconnect
+                </small>
+              </span>
+            </>
+          ) : isMyTurn ? (
+            <>
+              <span className="tb-icon">{canRoll ? '🎲' : '👆'}</span>
+              <span className="tb-text">
+                <b>YOUR TURN</b>
+                <small>{canRoll ? 'Tap the dice to roll' : `You rolled ${state.lastDie}. Tap a glowing token`}</small>
+              </span>
+              <span className="tb-time">{secondsLeft}s</span>
+            </>
+          ) : (
+            <>
+              <span className={`dot c-${currentPlayer?.color}`} />
+              <span className="tb-text">
+                <b>{nameOf(currentPlayer)}’s turn</b>
+                <small>{state.phase === 'awaitingMove' && state.lastDie ? `Rolled ${state.lastDie}, choosing a move…` : 'Rolling…'} Wait for your turn.</small>
+              </span>
+              <span className="tb-time">{secondsLeft}s</span>
+            </>
+          )}
+        </div>
+      )}
+
+      <LudoBoard state={state} myId={myId} onMove={onMove} activeColor={paused ? null : currentPlayer?.color} canAct={!paused} />
 
       <div className="action-bar">
         <Dice
@@ -296,15 +396,27 @@ export default function Game() {
           rolling={rolling}
           idle={!canRoll && !mustMove}
           onRoll={canRoll && !rolling ? onRoll : undefined}
+          size={canRoll ? 76 : 64}
+          color={roller?.color}
         />
+        {rollCaption && (
+          <span className={`roll-caption c-${roller.color}`}>
+            <span className={`dot c-${roller.color}`} /> {rollCaption}
+          </span>
+        )}
         {state.status === 'finished' ? (
           <span className="turn-note">Game over</span>
-        ) : !isMyTurn ? (
+        ) : paused ? (
+          <span className="turn-note">Paused: nobody can play until everyone is back.</span>
+        ) : canRoll ? (
+          <span className="turn-note mine">▲ Tap to roll</span>
+        ) : mustMove ? (
+          <span className="turn-note mine">Tap a glowing token on the board</span>
+        ) : (
           <span className="turn-note">
-            <span className={`dot c-${currentPlayer?.color}`} />{' '}
-            {currentPlayer ? (isPractice ? (currentPlayer.id === myId ? 'Your turn' : "Computer's turn…") : `${currentPlayer.name}'s turn…`) : ''}
+            <span className={`dot c-${currentPlayer?.color}`} /> Not your turn
           </span>
-        ) : null}
+        )}
       </div>
 
       {status === 'finished' && result && (

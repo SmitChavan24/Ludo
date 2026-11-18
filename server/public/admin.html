@@ -32,6 +32,7 @@
           <button class="tab" data-tab="tournaments">Tournaments</button>
           <button class="tab" data-tab="payments">Payments <span class="badge hidden" id="badge-payments"></span></button>
           <button class="tab" data-tab="withdrawals">Payouts <span class="badge hidden" id="badge-withdrawals"></span></button>
+          <button class="tab" data-tab="accounts">Accounts</button>
           <button class="tab" data-tab="players">Players</button>
           <button class="tab" data-tab="notify">Notify</button>
         </nav>
@@ -53,7 +54,7 @@
             <form id="t-form">
               <label>Title<input id="t-title" placeholder="Sunday ₹100 Cup" required /></label>
               <div class="grid2">
-                <label>Entry fee (₹)<input id="t-fee" type="number" min="0" value="100" /></label>
+                <label><span id="t-fee-label">Entry fee (₹)</span><input id="t-fee" type="number" min="0" value="100" /></label>
                 <label>Your cut (%)<input id="t-rake" type="number" min="0" max="30" step="0.5" value="10" /></label>
               </div>
               <div class="grid2">
@@ -153,6 +154,68 @@
           </div>
         </div>
 
+        <!-- Accounts: the books -->
+        <div class="panel hidden" data-panel="accounts">
+          <div class="card">
+            <div class="acc-head">
+              <h2>Accounts</h2>
+              <div class="acc-range">
+                <select id="acc-preset">
+                  <option value="today">Today</option>
+                  <option value="7">Last 7 days</option>
+                  <option value="30" selected>Last 30 days</option>
+                  <option value="month">This month</option>
+                  <option value="all">All time</option>
+                  <option value="custom">Custom…</option>
+                </select>
+                <input id="acc-from" type="date" class="hidden" />
+                <input id="acc-to" type="date" class="hidden" />
+                <button class="btn small" id="acc-refresh" type="button">Refresh</button>
+              </div>
+            </div>
+            <p class="sub" id="acc-range-label"></p>
+            <div class="kpis" id="acc-kpis"></div>
+          </div>
+
+          <div class="card">
+            <h2>Books check</h2>
+            <p class="sub">All time. Every coin ever created must be with a player, with the house, or in a game that is still running.</p>
+            <div id="acc-recon"></div>
+          </div>
+
+          <div class="card">
+            <div class="acc-head"><h2>Coin flow by category</h2><button class="btn small" id="acc-csv-cats" type="button">Download CSV</button></div>
+            <div class="table-wrap"><table class="ledger" id="acc-cats"></table></div>
+          </div>
+
+          <div class="card">
+            <div class="acc-head"><h2>Daily</h2><button class="btn small" id="acc-csv-daily" type="button">Download CSV</button></div>
+            <div class="table-wrap"><table class="ledger" id="acc-daily"></table></div>
+          </div>
+
+          <div class="card">
+            <div class="acc-head"><h2>Coin orders (₹)</h2><button class="btn small" id="acc-csv-orders" type="button">Download CSV</button></div>
+            <div class="table-wrap"><table class="ledger" id="acc-orders"></table></div>
+          </div>
+
+          <div class="card">
+            <div class="acc-head"><h2>Ledger</h2><button class="btn small" id="acc-csv-ledger" type="button">Download CSV</button></div>
+            <form id="acc-ledger-form" class="row acc-filters">
+              <input id="acc-l-account" placeholder="Player ID or __house__" />
+              <select id="acc-l-reason"><option value="">All reasons</option></select>
+              <button class="btn small" type="submit">Filter</button>
+            </form>
+            <div class="table-wrap"><table class="ledger" id="acc-ledger"></table></div>
+            <div class="acc-pager"><button class="btn small" id="acc-prev" type="button">← Newer</button><span id="acc-page"></span><button class="btn small" id="acc-next" type="button">Older →</button></div>
+          </div>
+
+          <div class="card">
+            <div class="acc-head"><h2>Admin activity</h2><button class="btn small" id="acc-csv-audit" type="button">Download CSV</button></div>
+            <p class="sub">Every change made from this panel: who, what, when and from where.</p>
+            <div class="table-wrap"><table class="ledger" id="acc-audit"></table></div>
+          </div>
+        </div>
+
         <!-- Notify -->
         <div class="panel hidden" data-panel="notify">
           <div class="card">
@@ -179,5 +242,6 @@
       <p id="action-msg" class="msg hidden"></p>
     </div>
     <script src="/admin.js"></script>
+    <script src="/admin-accounts.js"></script>
   </body>
 </html>

@@ -43,6 +43,10 @@ export default function TournamentModal({ id, onClose, onNeedWallet }) {
 
   const t = d.tournament;
   const money = d.money;
+  // Coin tournaments run the same maths in coins (money.unit === 'coins').
+  const isCoins = t.entryType === 'coins';
+  const fee = isCoins ? t.entryFeeCoins : t.entryFeeInr;
+  const fmt = (n) => (isCoins ? `🪙 ${Number(n || 0).toLocaleString('en-IN')}` : rupees(n));
   const full = d.entries.length >= t.maxPlayers;
 
   const act = async (fn, okMsg) => {
@@ -70,14 +74,14 @@ export default function TournamentModal({ id, onClose, onNeedWallet }) {
         <div className="stats-body">
           <div className="t-summary">
             <div className="t-stat">
-              <div className="t-stat-value">{t.entryFeeInr ? rupees(t.entryFeeInr) : 'Free'}</div>
+              <div className="t-stat-value">{fee ? fmt(fee) : 'Free'}</div>
               <div className="t-stat-label">entry</div>
             </div>
             <div className="t-stat">
-              <div className="t-stat-value">{rupees(money.prizePoolInr)}</div>
+              <div className="t-stat-value">{fmt(money.prizePoolInr)}</div>
               <div className="t-stat-label">prize pool</div>
               {money.ifFull.prizePoolInr > money.prizePoolInr && (
-                <div className="t-stat-note">up to {rupees(money.ifFull.prizePoolInr)} if full</div>
+                <div className="t-stat-note">up to {fmt(money.ifFull.prizePoolInr)} if full</div>
               )}
             </div>
             <div className="t-stat">
@@ -87,23 +91,23 @@ export default function TournamentModal({ id, onClose, onNeedWallet }) {
           </div>
 
           <p className="card-sub">
-            Starts {when(t.startsAt)} · winner takes {money.payouts[0] ? rupees(money.payouts[0].amountInr) : '—'}
-            {money.payouts[1] ? `, runner-up ${rupees(money.payouts[1].amountInr)}` : ''}
+            Starts {when(t.startsAt)} · winner takes {money.payouts[0] ? fmt(money.payouts[0].amountInr) : '—'}
+            {money.payouts[1] ? `, runner-up ${fmt(money.payouts[1].amountInr)}` : ''}
           </p>
           {/* The pot is funded entirely by entry fees, so it is not a fixed
               advertised prize — say so plainly rather than letting a player
               assume the full-table figure is guaranteed. */}
-          {t.entryFeeInr > 0 && money.ifFull.prizePoolInr > money.prizePoolInr && (
+          {fee > 0 && money.ifFull.prizePoolInr > money.prizePoolInr && (
             <p className="pool-note">
-              The prize pool grows as players join — it reaches {rupees(money.ifFull.prizePoolInr)} if all{' '}
+              The prize pool grows as players join — it reaches {fmt(money.ifFull.prizePoolInr)} if all{' '}
               {t.maxPlayers} seats fill.
             </p>
           )}
           {/* Say plainly that the entry fee is the ONLY charge — the platform
               fee is deducted from the pot, not added on top. */}
-          {t.entryFeeInr > 0 && (
+          {fee > 0 && (
             <p className="fee-note">
-              You pay {rupees(t.entryFeeInr)} — nothing else. Our {(t.rakeBips || 0) / 100}% fee comes out of the
+              You pay {fmt(fee)} — nothing else. Our {(t.rakeBips || 0) / 100}% fee comes out of the
               prize pool, never on top of your entry.
             </p>
           )}
@@ -135,22 +139,27 @@ export default function TournamentModal({ id, onClose, onNeedWallet }) {
                 disabled={busy}
                 onClick={() => act(() => tournamentApi.join(id), "You're in!")}
               >
-                {busy ? <><span className="btn-spin" />Joining…</> : `Join for ${rupees(t.entryFeeInr)}`}
+                {busy ? <><span className="btn-spin" />Joining…</> : `Join for ${fmt(fee)}`}
               </button>
               <p className="qr-note">Paid from your cash balance. <button className="link-btn" onClick={onNeedWallet}>Add money</button></p>
             </>
           ) : t.entryType === 'coins' ? (
-            <button
-              className="btn btn-primary btn-block btn-lg"
-              disabled={busy}
-              onClick={() => act(() => tournamentApi.join(id), "You're in!")}
-            >
-              {busy ? <><span className="btn-spin" />Joining…</> : `Join for 🪙 ${t.entryFeeCoins}`}
-            </button>
+            <>
+              <button
+                className="btn btn-primary btn-block btn-lg"
+                disabled={busy}
+                onClick={() => act(() => tournamentApi.join(id), "You're in!")}
+              >
+                {busy ? <><span className="btn-spin" />Joining…</> : `Join for ${fmt(t.entryFeeCoins)}`}
+              </button>
+              <p className="qr-note">
+                You have {fmt(me?.coins)}. <button className="link-btn" onClick={onNeedWallet}>Buy coins</button>
+              </p>
+            </>
           ) : (
             // Manual: pay by UPI for this specific tournament, then submit the UTR.
             <div className="t-pay">
-              <p className="card-sub">Pay {rupees(t.entryFeeInr)} by UPI, then enter your payment reference.</p>
+              <p className="card-sub">Pay {fmt(fee)} by UPI, then enter your payment reference.</p>
               {pay?.upiId && (
                 <div className="pay-to">
                   <div className="pay-to-row"><span>Pay to</span><b>{pay.upiId}</b></div>
@@ -204,12 +213,12 @@ export default function TournamentModal({ id, onClose, onNeedWallet }) {
                 {d.milestone.eliminated || d.milestone.isChampion ? (
                   <>
                     {d.milestone.place && <span>Finished {d.milestone.place} of {d.milestone.players}</span>}
-                    <span>{d.milestone.prizeAtCurrentPlace > 0 ? `Prize ${rupees(d.milestone.prizeAtCurrentPlace)}` : 'No prize'}</span>
+                    <span>{d.milestone.prizeAtCurrentPlace > 0 ? `Prize ${fmt(d.milestone.prizeAtCurrentPlace)}` : 'No prize'}</span>
                   </>
                 ) : (
                   <>
                     <span>Round {Math.max(1, d.milestone.round)} of {d.milestone.totalRounds}</span>
-                    <span>Title pays {rupees(d.milestone.prizeIfChampion)}</span>
+                    <span>Title pays {fmt(d.milestone.prizeIfChampion)}</span>
                   </>
                 )}
               </div>

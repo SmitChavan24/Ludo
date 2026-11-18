@@ -51,6 +51,7 @@ async function applyReferral(newUser, rawCode) {
 export async function claimDailyBonus(userId) {
   const user = await store.getUser(userId);
   if (!user) throw new Error('User not found');
+  if (config.economy.dailyBonus <= 0) return { granted: false, disabled: true };
 
   const now = Date.now();
   if (user.lastDailyBonusAt && now - user.lastDailyBonusAt < ONE_DAY_MS) {

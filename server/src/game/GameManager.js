@@ -67,6 +67,13 @@ export class GameManager {
       // Published from room creation so players see the dice commitment BEFORE
       // they contribute their seeds.
       serverSeedHash: room.dice ? room.dice.serverSeedHash : null,
+      // Players the game is waiting for, with how long they have left (relative
+      // ms, immune to clock skew). Empty when the game is not paused.
+      paused: [...(room.away || new Map()).entries()].map(([userId, a]) => ({
+        userId,
+        name: room.seats.find((x) => x.userId === userId)?.name || 'Player',
+        msLeft: Math.max(0, a.deadline - Date.now()),
+      })),
       seats: room.seats.map((s) => ({
         userId: s.userId,
         name: s.name,
@@ -152,6 +159,10 @@ export class GameManager {
       engine: null,
       turnTimer: null,
       disconnectTimers: new Map(), // userId -> grace timer
+      // userId -> { since, deadline } for players currently away. While any
+      // player is away the game is PAUSED: no turn clock, no rolls, no moves.
+      away: new Map(),
+      pauseUsed: new Map(), // userId -> ms of pause used so far this game
       botTimer: null, // practice: fills the table with a bot after a wait
       botMoveTimer: null,
       skipCount: 0,
@@ -269,6 +280,7 @@ export class GameManager {
     }
     const engine = room.engine;
     if (!engine || engine.phase === 'finished' || room.status !== 'playing') return;
+    if (this._isPaused(room)) return; // bots wait too
 
     const current = engine.currentPlayerId();
     if (!isBotId(current)) return;
@@ -387,6 +399,7 @@ export class GameManager {
   handleRoll(userId) {
     const room = this._roomOf(userId);
     if (!room || room.status !== 'playing') throw new GameError('No active game', 'NO_GAME');
+    this._assertNotPaused(room);
 
     const die = room.dice.roll();
     const result = room.engine.applyRoll(userId, die);
@@ -401,6 +414,7 @@ export class GameManager {
   async handleMove(userId, tokenIndex) {
     const room = this._roomOf(userId);
     if (!room || room.status !== 'playing') throw new GameError('No active game', 'NO_GAME');
+    this._assertNotPaused(room);
 
     const result = room.engine.applyMove(userId, tokenIndex);
     room.skipCount = 0;
@@ -438,9 +452,20 @@ export class GameManager {
 
   // ── turn-timeout watchdog ─────────────────────────────────────────────────
 
+  _isPaused(room) {
+    return room.status === 'playing' && room.away?.size > 0;
+  }
+
+  _assertNotPaused(room) {
+    if (!this._isPaused(room)) return;
+    const names = [...room.away.keys()].map((id) => room.seats.find((s) => s.userId === id)?.name || 'a player');
+    throw new GameError(`Game paused: waiting for ${names.join(', ')} to reconnect`, 'PAUSED');
+  }
+
   _armTurn(room) {
     this._clearTurn(room);
     if (!room.engine || room.engine.phase === 'finished') return;
+    if (this._isPaused(room)) return; // the clock is frozen while anyone is away
     room.turnTimer = setTimeout(() => this._onTurnTimeout(room), config.economy.turnTimeoutMs);
     // Don't let a pending turn timer alone keep the process alive.
     room.turnTimer.unref?.();
@@ -455,6 +480,7 @@ export class GameManager {
 
   _onTurnTimeout(room) {
     if (!room.engine || room.engine.phase === 'finished') return;
+    if (this._isPaused(room)) return;
     const pid = room.engine.currentPlayerId();
     room.engine.forceSkip(pid, 'timeout');
     room.skipCount += 1;
@@ -557,6 +583,8 @@ export class GameManager {
   // player standing, they win the pot — otherwise play continues (3–4 players).
   async _forfeit(room, leaverId) {
     this._clearTurn(room);
+    room.away?.delete(leaverId);
+    this._clearDisconnectTimer(room, leaverId);
     const result = room.engine.eliminatePlayer(leaverId);
     if (!result) return; // already out / game already over
 
@@ -606,6 +634,7 @@ export class GameManager {
     if (connected) {
       if (seat) seat.connected = true;
       this._clearDisconnectTimer(room, userId); // reconnected in time — cancel forfeit
+      this._endAway(room, userId);
       this._emitRoom(room, 'room:update', this.serializeRoom(room));
       return;
     }
@@ -626,17 +655,32 @@ export class GameManager {
       return;
     }
 
-    if (room.status === 'playing') {
+    if (room.status === 'playing' && !seat?.isBot && !room.away.has(userId)) {
+      // PAUSE the game until they come back: freeze the turn clock and stop
+      // everyone (and every bot) from playing on without them. They forfeit
+      // only if this absence outlasts the grace period or their pause budget.
+      const left = Math.max(0, config.economy.pauseBudgetMs - (room.pauseUsed.get(userId) || 0));
+      const wait = Math.min(config.economy.disconnectGraceMs, left);
+      const now = Date.now();
+      room.away.set(userId, { since: now, deadline: now + wait });
+      this._clearTurn(room);
+      if (room.botMoveTimer) {
+        clearTimeout(room.botMoveTimer);
+        room.botMoveTimer = null;
+      }
+      console.log(`[game ${room.id}] paused: ${seat?.name || userId} disconnected (waiting up to ${Math.round(wait / 1000)}s)`);
       this._emitRoom(room, 'room:update', this.serializeRoom(room));
-      // Give them a grace period to reconnect; if they don't, they forfeit so
-      // the opponent isn't left waiting on a rage-quitter for minutes.
+
       if (!room.disconnectTimers.has(userId)) {
         const timer = setTimeout(async () => {
           room.disconnectTimers.delete(userId);
           // Re-check at fire time: they may have reconnected on another socket.
-          if (await this._hasLiveSocket(userId)) return;
+          if (await this._hasLiveSocket(userId)) return this._endAway(room, userId);
+          console.log(`[game ${room.id}] ${seat?.name || userId} did not return in time: forfeit`);
+          this._chargePause(room, userId);
+          room.away.delete(userId);
           this.handleLeave(userId).catch(() => {});
-        }, config.economy.disconnectGraceMs);
+        }, wait);
         timer.unref?.();
         room.disconnectTimers.set(userId, timer);
       }
@@ -651,6 +695,33 @@ export class GameManager {
     } catch {
       return false; // no adapter (e.g. in tests) — treat as fully disconnected
     }
+  }
+
+  // Add the time this player has spent away to their pause budget.
+  _chargePause(room, userId) {
+    const a = room.away?.get(userId);
+    if (a) room.pauseUsed.set(userId, (room.pauseUsed.get(userId) || 0) + (Date.now() - a.since));
+  }
+
+  // A player who was away is back: unpause if nobody else is still away, and
+  // give whoever's turn it is a fresh, full turn clock.
+  _endAway(room, userId) {
+    if (!room.away?.has(userId)) return;
+    this._chargePause(room, userId);
+    room.away.delete(userId);
+    if (room.status !== 'playing' || !room.engine) return;
+    const seat = room.seats.find((s) => s.userId === userId);
+    if (this._isPaused(room)) {
+      console.log(`[game ${room.id}] ${seat?.name || userId} reconnected; still waiting for others`);
+      return;
+    }
+    console.log(`[game ${room.id}] resumed: ${seat?.name || userId} reconnected`);
+    this._emitRoom(room, 'game:state', {
+      state: room.engine.getState(),
+      note: { type: 'resumed', playerId: userId },
+    });
+    this._armTurn(room);
+    this._maybeBotTurn(room);
   }
 
   _clearDisconnectTimer(room, userId) {

@@ -39,7 +39,7 @@ function classify(r, c) {
 
 const pct = (n) => `${(n / 15) * 100}%`;
 
-export default function LudoBoard({ state, myId, onMove }) {
+export default function LudoBoard({ state, myId, onMove, activeColor = null, canAct = true }) {
   // Tokens whose board position just changed get a brief "travel" lift so moves
   // read as a piece being picked up and placed, not teleported.
   const prevPos = useRef(new Map());
@@ -92,7 +92,7 @@ export default function LudoBoard({ state, myId, onMove }) {
     return (
       <div
         key={color}
-        className={`yard-tray c-${color}`}
+        className={`yard-tray c-${color} ${color === activeColor ? 'yard-active' : ''}`}
         style={{ top: pct(yr + 1), left: pct(yc + 1), width: pct(4), height: pct(4) }}
       />
     );
@@ -110,7 +110,7 @@ export default function LudoBoard({ state, myId, onMove }) {
   );
 
   // Whose turn + which token indices may move (only ever the local player's).
-  const myTurn = state.currentPlayerId === myId && state.phase === 'awaitingMove';
+  const myTurn = canAct && state.currentPlayerId === myId && state.phase === 'awaitingMove';
   const movable = new Set(myTurn ? state.legalMoves.map((m) => m.tokenIndex) : []);
 
   // Build token list, then fan out any that share a cell so none hide.
@@ -151,7 +151,7 @@ export default function LudoBoard({ state, myId, onMove }) {
   });
 
   return (
-    <div className="board-wrap">
+    <div className={`board-wrap ${activeColor ? `turn-${activeColor}` : ''} ${activeColor && state.currentPlayerId === myId ? 'my-turn' : ''}`}>
       <div className="board">
         {cells}
         {trays}

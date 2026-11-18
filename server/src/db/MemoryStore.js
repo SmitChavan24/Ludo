@@ -12,6 +12,7 @@ export class MemoryStore {
     this.gamePlayers = []; // one entry per player per finished game
     this.tournaments = new Map(); // id -> tournament
     this.withdrawals = new Map(); // id -> withdrawal request
+    this.coinOrders = new Map(); // id -> coin shop order
     this.pushSubs = new Map(); // endpoint -> subscription
     this.claims = new Map(); // id -> payment claim
     this.tournamentEntries = []; // { tournamentId, userId, seed, paymentRef, addedBy, joinedAt, placement }
@@ -327,5 +328,31 @@ export class MemoryStore {
   async setDailyBonusClaimed(userId, timestamp) {
     const u = this.users.get(userId);
     if (u) u.lastDailyBonusAt = timestamp;
+  }
+
+  // ── coin shop orders ──
+  async createCoinOrder(o) {
+    this.coinOrders.set(o.id, { ...o });
+    return { ...this.coinOrders.get(o.id) };
+  }
+
+  async getCoinOrder(id) {
+    const o = this.coinOrders.get(id);
+    return o ? { ...o } : null;
+  }
+
+  async updateCoinOrder(id, patch) {
+    const o = this.coinOrders.get(id);
+    if (!o) return null;
+    Object.assign(o, patch, { updatedAt: Date.now() });
+    return { ...o };
+  }
+
+  async listCoinOrders({ status = null, userId = null, since = null, until = null, limit = 50 } = {}) {
+    return [...this.coinOrders.values()]
+      .filter((o) => (!status || o.status === status) && (!userId || o.userId === userId) && (!since || o.createdAt >= since) && (!until || o.createdAt < until))
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, limit)
+      .map((o) => ({ ...o }));
   }
 }

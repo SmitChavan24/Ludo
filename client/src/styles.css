@@ -462,3 +462,60 @@ input:focus { border-color: var(--primary); }
 .how-num { flex: 0 0 22px; height: 22px; border-radius: 50%; background: var(--primary); color: #fff; font-weight: 800; font-size: 12px; display: grid; place-items: center; }
 .how-step b { font-size: 13px; }
 .how-step p { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 3px 0 0; }
+
+/* ── Coin shop ── */
+.shop-balance { margin-bottom: 14px; }
+.shop-packs { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 6px 0 12px; }
+.shop-pack { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 10px; border-radius: 14px; border: 1px solid var(--line); background: var(--bg-2); color: inherit; font-family: inherit; cursor: pointer; }
+.shop-pack:hover:not(:disabled) { border-color: var(--accent); }
+.shop-pack:disabled { opacity: .6; cursor: wait; }
+.shop-coins { font-size: 17px; font-weight: 900; color: var(--accent); }
+.shop-price { font-weight: 800; color: var(--green); display: inline-flex; align-items: center; gap: 6px; }
+.shop-orders { margin-top: 14px; }
+.shop-order { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.shop-status { color: var(--muted); }
+.shop-status.credited { color: var(--green); }
+.legal-links { display: flex; justify-content: center; gap: 14px; font-size: 12px; }
+.legal-links a { color: var(--muted); }
+
+/* ── Whose turn is it? (impossible to miss) ── */
+.turn-banner { --tc: var(--muted); display: flex; align-items: center; gap: 12px; margin: 8px 0; padding: 10px 14px; border-radius: 14px; border: 2px solid var(--tc); background: color-mix(in srgb, var(--tc) 14%, var(--card)); transition: background .25s, border-color .25s; }
+.turn-banner.c-red { --tc: var(--red); } .turn-banner.c-green { --tc: var(--green); }
+.turn-banner.c-yellow { --tc: var(--yellow); } .turn-banner.c-blue { --tc: var(--blue); }
+.turn-banner .tb-icon { font-size: 26px; line-height: 1; }
+.turn-banner .tb-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.turn-banner .tb-text b { font-size: 17px; letter-spacing: .3px; }
+.turn-banner .tb-text small { color: var(--muted); font-size: 12.5px; }
+.turn-banner .tb-time { font-weight: 900; font-variant-numeric: tabular-nums; font-size: 18px; min-width: 40px; text-align: right; }
+.turn-banner .dot { width: 14px; height: 14px; }
+/* My turn: solid player colour, white text, gentle pulse. */
+.turn-banner.mine { background: var(--tc); color: #fff; animation: tbPulse 1.4s ease-in-out infinite; box-shadow: 0 0 0 0 color-mix(in srgb, var(--tc) 60%, transparent); }
+.turn-banner.mine .tb-text small { color: rgba(255, 255, 255, .9); }
+.turn-banner.mine.low { background: var(--red); border-color: var(--red); }
+.turn-banner.mine.low .tb-time { animation: pulse .6s infinite; }
+@keyframes tbPulse { 50% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--tc) 0%, transparent); } }
+.turn-banner.theirs { opacity: .95; }
+.turn-banner.paused { --tc: #f59e0b; background: color-mix(in srgb, #f59e0b 16%, var(--card)); }
+
+/* The active player's corner glows; the board is outlined in their colour. */
+.board-wrap { border-radius: 18px; transition: box-shadow .25s; }
+.board-wrap.turn-red { box-shadow: 0 0 0 3px var(--red); } .board-wrap.turn-green { box-shadow: 0 0 0 3px var(--green); }
+.board-wrap.turn-yellow { box-shadow: 0 0 0 3px var(--yellow); } .board-wrap.turn-blue { box-shadow: 0 0 0 3px var(--blue); }
+.board-wrap.my-turn { animation: boardGlow 1.4s ease-in-out infinite; }
+@keyframes boardGlow { 50% { filter: brightness(1.08); } }
+.yard-active { animation: yardPulse 1.2s ease-in-out infinite; z-index: 2; }
+@keyframes yardPulse { 50% { filter: brightness(1.35) saturate(1.2); } }
+
+/* Player chips: who is up, who is me, who is offline. */
+.player-chip.turn { border-width: 2px; }
+.player-chip.c-red.turn { border-color: var(--red); } .player-chip.c-green.turn { border-color: var(--green); }
+.player-chip.c-yellow.turn { border-color: var(--yellow); } .player-chip.c-blue.turn { border-color: var(--blue); }
+.pc-turn { font-size: 10px; font-weight: 900; letter-spacing: .5px; padding: 2px 6px; border-radius: 999px; background: var(--accent); color: #1a1a1a; }
+.pc-away { font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 999px; background: #f59e0b; color: #1a1a1a; }
+.turn-note.mine { color: var(--accent); font-weight: 800; animation: pulse 1.2s infinite; }
+
+/* Last roll: ringed in the roller's colour, with a caption both players see. */
+.die-by { box-shadow: 0 8px 16px rgba(0, 0, 0, .45), 0 0 0 4px var(--rc), inset 0 -4px 6px rgba(0, 0, 0, .14), inset 0 3px 4px rgba(255, 255, 255, .95); }
+.die-by.c-red { --rc: var(--red); } .die-by.c-green { --rc: var(--green); }
+.die-by.c-yellow { --rc: var(--yellow); } .die-by.c-blue { --rc: var(--blue); }
+.roll-caption { display: flex; align-items: center; gap: 6px; font-weight: 800; font-size: 14px; }

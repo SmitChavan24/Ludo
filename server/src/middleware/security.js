@@ -16,7 +16,7 @@ export const helmetMiddleware = helmet({
       frameSrc: ["'self'", 'https://accounts.google.com'],
       connectSrc: ["'self'", 'https://accounts.google.com', 'ws:', 'wss:'],
       imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
-      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://accounts.google.com'],
       fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
       mediaSrc: ["'self'", 'blob:'], // camera preview for the UPI QR scanner
       objectSrc: ["'none'"],
@@ -26,6 +26,11 @@ export const helmetMiddleware = helmet({
     },
   },
   crossOriginEmbedderPolicy: false, // would block Google's sign-in iframe
+  // Google Sign-In opens a popup that must message this page back. The default
+  // 'same-origin' cuts that link and leaves the popup stuck on a blank page.
+  crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
+  // Google checks the page's origin via the Referer; 'no-referrer' hides it.
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
 });
 
 // Only our own front-end origins may call the API / open a socket.

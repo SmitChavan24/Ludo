@@ -29,6 +29,20 @@ const optional = (name) => {
   return v || null;
 };
 
+function parseCoinPacks(spec) {
+  const packs = [];
+  for (const part of spec.split(',').map((x) => x.trim()).filter(Boolean)) {
+    const [id, coins, rupees] = part.split(':');
+    const c = parseInt(coins, 10);
+    const r = parseInt(rupees, 10);
+    if (!/^[a-z0-9_-]{1,32}$/i.test(id || '') || !(c > 0) || !(r >= 1)) {
+      throw new Error(`[config] bad COIN_PACKS entry "${part}" (expected id:coins:rupees)`);
+    }
+    packs.push({ id, coins: c, priceInr: r });
+  }
+  return packs;
+}
+
 // Refuse to run with settings that would be catastrophic in production. It is
 // far better to fail loudly at boot than to serve real money with a default
 // password or a placeholder secret.
@@ -145,6 +159,26 @@ export const config = {
     database: process.env.DB_NAME || 'coinludo',
     connectionLimit: int('DB_POOL', 10),
   },
+  // Real-money features: cash wallet, UPI deposits, withdrawals and cash-entry
+  // tournaments. OFF unless explicitly enabled. When off, coins are the only
+  // currency: they can be bought, but never withdrawn or converted to money.
+  cashEnabled: process.env.CASH_ENABLED === 'true',
+  // Coin packs sold through the BillTrack Pay integration.
+  shop: {
+    // "id:coins:rupees" entries, comma-separated, e.g. "starter:500:49,big:1500:129"
+    packs: parseCoinPacks(process.env.COIN_PACKS || 'p100:100:100,p250:250:250,p1000:1000:1000'),
+    // Pay API base reached SERVER-SIDE (on the same box, use the local port).
+    payApiUrl: (process.env.PAY_API_URL || '').replace(/\/$/, ''),
+    payApiKey: process.env.PAY_API_KEY || '',
+    // Where the pay site sends the player back to (this app's public origin).
+    publicUrl: (process.env.PUBLIC_URL || '').replace(/\/$/, ''),
+    get enabled() {
+      return !!(this.payApiUrl && this.payApiKey && this.publicUrl && this.packs.length);
+    },
+    // Unpaid orders older than this stop being checked and are marked expired.
+    orderTtlMs: int('COIN_ORDER_TTL_MINUTES', 24 * 60) * 60_000,
+    pollMs: int('COIN_ORDER_POLL_SECONDS', 30) * 1000,
+  },
   // Real money held on behalf of players. Whole rupees only — the tournament
   // economics module is integer-rupee throughout, so the wallet matches it.
   cash: {
@@ -163,7 +197,12 @@ export const config = {
     rakeBips: int('RAKE_BIPS', 500),
     turnTimeoutMs: int('TURN_TIMEOUT_MS', 30000),
     // Grace after a disconnect before the player forfeits (allows quick reconnects).
-    disconnectGraceMs: int('DISCONNECT_GRACE_MS', 25000),
+    // A disconnect PAUSES the game (turn clock frozen, nobody can play) until
+    // the player returns. They forfeit only if one absence lasts longer than
+    // disconnectGraceMs, or their absences add up to more than pauseBudgetMs
+    // in one game, so a losing player can't stall the table forever.
+    disconnectGraceMs: int('DISCONNECT_GRACE_MS', 90000),
+    pauseBudgetMs: int('PAUSE_BUDGET_MS', 180000),
     // ── Matchmaking liquidity ──
     // The ONLY stakes and table sizes players may choose. Keep this list SHORT at
     // launch: every extra combination splits your player pool into another queue,

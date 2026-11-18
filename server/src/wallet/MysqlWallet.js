@@ -97,6 +97,22 @@ export class MysqlWallet {
     return { balanceAfter };
   }
 
+  // Credit exactly once per `key`. The key row is inserted in the SAME
+  // transaction as the credit, so either both happen or neither does; a second
+  // attempt hits the primary key and credits nothing. Returns null if applied.
+  async creditOnce(key, accountId, amount, reason, refId) {
+    this._assertPositiveInt(amount);
+    try {
+      return await this._withTxn(async (c) => {
+        await c.execute('INSERT INTO wallet_once(once_key, created_at) VALUES(?, ?)', [key, Date.now()]);
+        return { balanceAfter: await this._applyTxn(c, accountId, amount, reason, refId) };
+      });
+    } catch (err) {
+      if (err.code === 'ER_DUP_ENTRY') return null;
+      throw err;
+    }
+  }
+
   async debit(accountId, amount, reason, refId) {
     this._assertPositiveInt(amount);
     const balanceAfter = await this._withTxn(async (c) => {
@@ -132,5 +148,91 @@ export class MysqlWallet {
       for (const uid of userIds) await this._applyTxn(c, uid, stake, 'game_refund', gameId);
       return { refunded: userIds.length * stake };
     });
+  }
+
+  // ── accounting reports (read-only) ──
+  // Account kinds: '__house__' = the house; 'cash:'/'winnings:' = real-money
+  // accounts (unused while cash is off); anything else is a player's coins.
+
+  _range(since, until) {
+    const where = [];
+    const params = [];
+    if (since) { where.push('created_at >= ?'); params.push(since); }
+    if (until) { where.push('created_at < ?'); params.push(until); }
+    return { where, params };
+  }
+
+  // Totals per reason and account kind within a time range.
+  async ledgerSummary({ since = null, until = null } = {}) {
+    const { where, params } = this._range(since, until);
+    const [rows] = await this.pool.query(
+      `SELECT reason,
+              CASE WHEN account_id = '${HOUSE_ACCOUNT}' THEN 'house'
+                   WHEN account_id LIKE 'cash:%' OR account_id LIKE 'winnings:%' THEN 'cash'
+                   ELSE 'player' END AS kind,
+              COUNT(*) AS n,
+              COALESCE(SUM(CASE WHEN delta > 0 THEN delta ELSE 0 END), 0) AS credits,
+              COALESCE(SUM(CASE WHEN delta < 0 THEN -delta ELSE 0 END), 0) AS debits
+       FROM ledger ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+       GROUP BY reason, kind`,
+      params,
+    );
+    return rows.map((r) => ({ reason: r.reason, kind: r.kind, count: Number(r.n), credits: Number(r.credits), debits: Number(r.debits) }));
+  }
+
+  // Same, per calendar day in India time (UTC+5:30).
+  async ledgerDaily({ since = null, until = null } = {}) {
+    const { where, params } = this._range(since, until);
+    const [rows] = await this.pool.query(
+      `SELECT DATE_ADD('1970-01-01', INTERVAL FLOOR((created_at + 19800000) / 86400000) DAY) AS day,
+              reason,
+              CASE WHEN account_id = '${HOUSE_ACCOUNT}' THEN 'house'
+                   WHEN account_id LIKE 'cash:%' OR account_id LIKE 'winnings:%' THEN 'cash'
+                   ELSE 'player' END AS kind,
+              COALESCE(SUM(CASE WHEN delta > 0 THEN delta ELSE 0 END), 0) AS credits,
+              COALESCE(SUM(CASE WHEN delta < 0 THEN -delta ELSE 0 END), 0) AS debits
+       FROM ledger ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+       GROUP BY day, reason, kind ORDER BY day DESC`,
+      params,
+    );
+    return rows.map((r) => ({
+      day: r.day instanceof Date ? r.day.toISOString().slice(0, 10) : String(r.day).slice(0, 10),
+      reason: r.reason, kind: r.kind, credits: Number(r.credits), debits: Number(r.debits),
+    }));
+  }
+
+  // Raw ledger lines, newest first, with optional filters.
+  async listLedger({ accountId = null, reason = null, since = null, until = null, limit = 100, offset = 0 } = {}) {
+    const { where, params } = this._range(since, until);
+    if (accountId) { where.push('account_id = ?'); params.push(accountId); }
+    if (reason) { where.push('reason = ?'); params.push(reason); }
+    const lim = Math.max(1, Math.min(5000, parseInt(limit, 10) || 100));
+    const off = Math.max(0, parseInt(offset, 10) || 0);
+    const clause = where.length ? 'WHERE ' + where.join(' AND ') : '';
+    const [rows] = await this.pool.query(
+      `SELECT id, account_id, delta, reason, ref_id, balance_after, created_at FROM ledger ${clause}
+       ORDER BY created_at DESC, id DESC LIMIT ${lim} OFFSET ${off}`,
+      params,
+    );
+    const [[{ total }]] = await this.pool.query(`SELECT COUNT(*) AS total FROM ledger ${clause}`, params);
+    return {
+      total: Number(total),
+      rows: rows.map((r) => ({
+        id: r.id, account: r.account_id, delta: Number(r.delta), reason: r.reason,
+        refId: r.ref_id, balanceAfter: Number(r.balance_after), at: Number(r.created_at),
+      })),
+    };
+  }
+
+  // Current coins held by players and by the house, right now.
+  async balanceTotals() {
+    const [[row]] = await this.pool.query(
+      `SELECT
+         COALESCE(SUM(CASE WHEN account_id <> '${HOUSE_ACCOUNT}' AND account_id NOT LIKE 'cash:%' AND account_id NOT LIKE 'winnings:%' THEN coins ELSE 0 END), 0) AS players,
+         COALESCE(SUM(CASE WHEN account_id = '${HOUSE_ACCOUNT}' THEN coins ELSE 0 END), 0) AS house,
+         SUM(CASE WHEN account_id <> '${HOUSE_ACCOUNT}' AND account_id NOT LIKE 'cash:%' AND account_id NOT LIKE 'winnings:%' AND coins > 0 THEN 1 ELSE 0 END) AS holders
+       FROM balances`,
+    );
+    return { players: Number(row.players), house: Number(row.house), holders: Number(row.holders || 0) };
   }
 }

@@ -167,6 +167,40 @@ const SCHEMA = [
      created_at    BIGINT      NOT NULL,
      INDEX idx_ledger_account (account_id, created_at)
    ) ENGINE=InnoDB`,
+
+  // Admin audit trail: who changed what, when and from where. Append-only.
+  `CREATE TABLE IF NOT EXISTS admin_audit (
+     id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+     at         BIGINT       NOT NULL,
+     actor      VARCHAR(64)  NOT NULL,
+     action     VARCHAR(160) NOT NULL,
+     ip         VARCHAR(64),
+     detail     TEXT,
+     INDEX idx_audit_at (at)
+   ) ENGINE=InnoDB`,
+
+  // One row per credit that must never repeat (see wallet.creditOnce).
+  `CREATE TABLE IF NOT EXISTS wallet_once (
+     once_key   VARCHAR(96) PRIMARY KEY,
+     created_at BIGINT      NOT NULL
+   ) ENGINE=InnoDB`,
+
+  // Coin packs bought through pay.billtrack.me. Coins are credited only after
+  // the pay server itself reports the payment as paid.
+  `CREATE TABLE IF NOT EXISTS coin_orders (
+     id             VARCHAR(32) PRIMARY KEY,
+     user_id        VARCHAR(32) NOT NULL,
+     pack_id        VARCHAR(32) NOT NULL,
+     coins          INT         NOT NULL,
+     amount_inr     INT         NOT NULL,
+     pay_payment_id VARCHAR(64),
+     checkout_url   VARCHAR(255),
+     status         VARCHAR(16) NOT NULL,
+     created_at     BIGINT      NOT NULL,
+     updated_at     BIGINT      NOT NULL,
+     INDEX idx_co_user (user_id, created_at),
+     INDEX idx_co_status (status, created_at)
+   ) ENGINE=InnoDB`,
 ];
 
 // Columns/indexes added after the first release. CREATE TABLE IF NOT EXISTS

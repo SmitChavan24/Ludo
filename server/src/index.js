@@ -12,6 +12,7 @@ import { GameManager } from './game/GameManager.js';
 import { registerSocketHandlers } from './socket/handlers.js';
 import { initStorage } from './db/initStorage.js';
 import { scheduler } from './tournament/scheduler.js';
+import { shop } from './shop/CoinShop.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -38,6 +39,10 @@ app.use(
     },
   }),
 );
+// Legal pages (static HTML, linked from the lobby, coin shop and Google consent screen).
+for (const page of ['privacy', 'terms']) {
+  app.get(`/${page}`, (req, res) => res.sendFile(path.join(publicDir, `${page}.html`)));
+}
 app.get('/admin', (req, res) => {
   res.setHeader('Cache-Control', 'no-store, must-revalidate');
   res.sendFile(path.join(publicDir, 'admin.html'));
@@ -78,6 +83,7 @@ async function start() {
   await initStorage();
   // Tournaments begin (or get cancelled) on their own schedule.
   scheduler.start();
+  shop.start(); // credits coin packs paid on pay.billtrack.me
 
   // `listen` reports failures as an 'error' EVENT, not a rejected promise, so
   // without this a bad port escapes to the uncaughtException handler as a raw
@@ -97,6 +103,7 @@ async function start() {
 
   server.listen(config.port, () => {
     console.log(`♟  Ludo server listening on http://localhost:${config.port}  (${config.env})`);
+    console.log(`   Cash features: ${config.cashEnabled ? 'ON' : 'off'} · Coin shop: ${shop.enabled ? 'on' : 'off'}`);
     console.log(`   CORS origins: ${config.clientOrigins.join(', ')}`);
     if (config.allowDevLogin) console.log('   Dev login ENABLED (POST /api/auth/dev)');
   });
