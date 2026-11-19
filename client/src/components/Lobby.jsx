@@ -101,6 +101,9 @@ export default function Lobby() {
   const winRate = user.gamesPlayed ? Math.round((user.gamesWon / user.gamesPlayed) * 100) : 0;
   const tooPoor = stake > user.coins;
   const pot = stake * players;
+  // Live queue per stake for the selected table size (from presence).
+  const waitingAt = (s) => presence?.waitingBy?.[`${players}:${s}`] || 0;
+  const playingAt = (s) => presence?.playingBy?.[`${players}:${s}`] || 0;
 
   return (
     <div className="lobby">
@@ -179,16 +182,23 @@ export default function Lobby() {
           <>
             <label className="field-label">Stake</label>
             <div className="stake-grid">
-              {stakes.map((s) => (
-                <button
-                  key={s}
-                  className={`stake-pill ${stake === s ? 'active' : ''} ${s > user.coins ? 'disabled' : ''}`}
-                  disabled={s > user.coins}
-                  onClick={() => setStake(s)}
-                >
-                  🪙 {s}
-                </button>
-              ))}
+              {stakes.map((s) => {
+                const w = waitingAt(s);
+                const p = playingAt(s);
+                return (
+                  <button
+                    key={s}
+                    className={`stake-pill ${stake === s ? 'active' : ''} ${s > user.coins ? 'disabled' : ''} ${w > 0 ? 'has-waiting' : ''}`}
+                    disabled={s > user.coins}
+                    onClick={() => setStake(s)}
+                  >
+                    <span className="stake-amt">🪙 {s}</span>
+                    <span className="stake-live">
+                      {w > 0 ? `${w} waiting` : p > 0 ? `${p} playing` : 'nobody yet'}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </>
         )}
@@ -197,7 +207,11 @@ export default function Lobby() {
           ⚡ Play Now · 🪙 {stake}
         </button>
         <p className="hint">
-          {tooPoor ? 'Not enough coins for this stake.' : `Winner takes 🪙 ${pot} · ${rakeBips / 100}% platform fee`}
+          {tooPoor
+            ? 'Not enough coins for this stake.'
+            : waitingAt(stake) > 0
+              ? `⚡ Someone is waiting at 🪙 ${stake}: you'll start right away. Winner takes 🪙 ${pot}.`
+              : `Winner takes 🪙 ${pot} · ${rakeBips / 100}% platform fee`}
         </p>
       </section>
 

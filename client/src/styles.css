@@ -521,3 +521,11 @@ input:focus { border-color: var(--primary); }
 .roll-caption { display: flex; align-items: center; gap: 6px; font-weight: 800; font-size: 14px; }
 .install-steps { margin: 6px 0 10px; padding-left: 20px; font-size: 13.5px; line-height: 1.55; }
 .install-steps li { margin: 2px 0; }
+
+/* Stake pills show the live queue at each stake. */
+.stake-pill { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.stake-amt { font-size: 15px; }
+.stake-live { font-size: 10.5px; font-weight: 600; color: var(--muted); }
+.stake-pill.has-waiting { border-color: var(--green); }
+.stake-pill.has-waiting .stake-live { color: var(--green); font-weight: 800; }
+.stake-pill.has-waiting:not(.active) { animation: pulse 1.6s infinite; }

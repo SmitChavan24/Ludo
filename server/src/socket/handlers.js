@@ -81,6 +81,9 @@ export function registerSocketHandlers(io, manager) {
         }
         try {
           const result = await fn(payload || {});
+          // Joining or leaving a queue changes the lobby's live counts; push
+          // them now instead of waiting for the next presence tick.
+          if (/^(lobby|room):|leave/.test(event)) presence.broadcast();
           if (typeof ack === 'function') ack({ ok: true, ...(result || {}) });
         } catch (err) {
           const clean =

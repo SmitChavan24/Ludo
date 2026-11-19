@@ -30,11 +30,24 @@ export class Presence {
   snapshot() {
     let waiting = 0;
     let playing = 0;
+    // Quick Match only pairs players at the same stake and table size, so the
+    // lobby shows who is waiting (and playing) for each "players:stake" pair.
+    // Only public coin tables count: private friend rooms and practice games
+    // aren't joinable from Quick Match.
+    const waitingBy = {};
+    const playingBy = {};
     for (const room of this.manager.rooms.values()) {
-      if (room.status === 'waiting') waiting += room.seats.length;
-      else if (room.status === 'playing') playing += room.seats.length;
+      const key = `${room.maxPlayers}:${room.stake}`;
+      const queue = !room.isPrivate && !room.isPractice;
+      if (room.status === 'waiting') {
+        waiting += room.seats.length;
+        if (queue) waitingBy[key] = (waitingBy[key] || 0) + room.seats.length;
+      } else if (room.status === 'playing') {
+        playing += room.seats.length;
+        if (queue) playingBy[key] = (playingBy[key] || 0) + room.seats.length;
+      }
     }
-    return { online: this.sockets.size, waiting, playing };
+    return { online: this.sockets.size, waiting, playing, waitingBy, playingBy };
   }
 
   broadcast() {
